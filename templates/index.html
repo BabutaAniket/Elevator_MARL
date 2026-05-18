@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lift RL Simulator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Verdana, Geneva, sans-serif; background: #f5f5f5; color: #333; font-size: 15px; overflow-y: auto; }
+
+        .header { background: #333; color: #fff; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 22px; }
+        .header .status { font-size: 16px; }
+        .status.running { color: #4a4; }
+        .status.stopped { color: #a44; }
+        .status.paused { color: #aa4; }
+
+        .main { display: flex; gap: 10px; padding: 10px; min-height: calc(100vh - 50px); }
+
+        /* Control Panel */
+        .panel { background: #fff; border: 1px solid #ccc; padding: 10px; overflow-y: auto; }
+        .controls { width: 260px; min-width: 260px; }
+        .controls h3 { margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+        .form-group { margin-bottom: 8px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 2px; font-size: 13px; }
+        .form-group input, .form-group select { width: 100%; padding: 4px; border: 1px solid #ccc; font-family: inherit; font-size: 14px; }
+        .btn { padding: 6px 12px; border: 1px solid #333; background: #fff; cursor: pointer; font-family: inherit; font-size: 14px; margin: 2px; }
+        .btn:hover { background: #eee; }
+        .btn.active { background: #333; color: #fff; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+
+        /* Lift Visualization */
+        .viz { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+        .banks { display: flex; gap: 10px; min-height: 520px; }
+        .bank { flex: 1; }
+        .bank h3 { text-align: center; margin-bottom: 4px; }
+
+        .shaft-container { display: flex; gap: 2px; position: relative; }
+        .floor-labels { width: 30px; display: flex; flex-direction: column-reverse; }
+        .floor-label { height: 20px; line-height: 20px; text-align: right; font-size: 12px; padding-right: 2px; }
+        .floor-label.common { color: #666; }
+        .floor-label.exclusive { color: #000; font-weight: bold; }
+
+        .shaft { width: 28px; display: flex; flex-direction: column-reverse; border: 1px solid #999; }
+        .shaft-cell { height: 20px; border-bottom: 1px solid #eee; position: relative; }
+        .lift-car { position: absolute; width: 100%; height: 100%; font-size: 10px; text-align: center; line-height: 20px; font-weight: bold; }
+        .lift-car.idle { background: #ccc; }
+        .lift-car.moving { background: #6af; }
+        .lift-car.door-open { background: #6c6; }
+        .lift-car.decel { background: #fc6; }
+        .lift-car.full { border: 2px solid #c00; }
+
+        /* Metrics */
+        .metrics-bar { display: flex; gap: 10px; flex-wrap: wrap; }
+        .metric { background: #fff; border: 1px solid #ccc; padding: 6px 10px; min-width: 120px; }
+        .metric .label { font-size: 12px; color: #666; }
+        .metric .value { font-size: 21px; font-weight: bold; }
+        .metric .value.warn { color: #a60; }
+        .metric .value.bad { color: #c00; }
+
+        /* Floor Waiting */
+        .floor-waiting { display: flex; gap: 10px; margin-top: 10px; }
+        .floor-bar-chart { flex: 1; }
+        .floor-row { display: flex; align-items: center; margin: 1px 0; }
+        .floor-row .fname { width: 30px; font-size: 12px; text-align: right; padding-right: 4px; }
+        .floor-row .bar { height: 12px; background: #69c; min-width: 1px; transition: width 0.3s; }
+        .floor-row .count { font-size: 12px; margin-left: 4px; }
+
+        /* Charts area */
+        .charts { background: #fff; border: 1px solid #ccc; padding: 10px; }
+        .chart-canvas { width: 100%; height: 200px; }
+
+        /* History */
+        .history { width: 220px; min-width: 220px; }
+        .run-item { padding: 4px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+        .run-item:hover { background: #eee; }
+        .run-item .run-name { font-weight: bold; }
+
+        /* Burst panel */
+        .burst-section { margin-top: 10px; border-top: 1px solid #ccc; padding-top: 8px; }
+
+        /* Tabs */
+        .tabs { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 8px; }
+        .tab { padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; border-bottom: none; font-size: 13px; }
+        .tab.active { background: #fff; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .sim-time { font-size: 17px; }
+
+        /* Summary Modal */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.open { display: flex; }
+        .modal-box { background: #fff; border: 2px solid #333; padding: 24px; width: 640px; max-width: 96vw; max-height: 90vh; overflow-y: auto; position: relative; }
+        .modal-box h2 { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 14px; }
+        .modal-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #ddd; border: 1px solid #ddd; margin-bottom: 16px; }
+        .mm-cell { background: #fff; padding: 7px 10px; }
+        .mm-cell .mk { font-size: 12px; color: #888; }
+        .mm-cell .mv { font-size: 17px; font-weight: bold; }
+        .mm-cell .mv.good { color: #2a7a2a; }
+        .mm-cell .mv.warn { color: #a06000; }
+        .mm-cell .mv.bad  { color: #b00020; }
+        .modal-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+        .modal-btns .btn { font-size: 14px; }
+        .btn-danger { background: #a44; color: #fff; border-color: #a44; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Lift RL Simulator</h1>
+        <span class="sim-time" id="simTime">--:--:--</span>
+        <span class="status stopped" id="statusLabel">STOPPED</span>
+    </div>
+
+    <div class="main">
+        <!-- Control Panel -->
+        <div class="panel controls">
+            <h3>Simulation Setup</h3>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="simName" value="Test Run">
+            </div>
+            <div class="form-group">
+                <label>Algorithm</label>
+                <select id="algorithm">
+                    <option value="scan">SCAN (Baseline)</option>
+                    <option value="nearest">Nearest First (Baseline)</option>
+                    <option value="roundrobin">Round-Robin (Baseline)</option>
+                    <option value="idlewait">Idle-Wait (Baseline)</option>
+                    <option value="astar">A* Dispatch (Heuristic)</option>
+                    <option value="astar_scan">A* + Scan Hybrid (Heuristic)</option>
+                    <option value="ppo">PPO (RL - Policy Optimization)</option>
+                    <option value="dqn">DQN (RL - Deep Q-Network)</option>
+                    <option value="reinforce">REINFORCE (RL - Policy Gradient)</option>
+                    <option value="qlearning">Q-Learning (RL - Tabular)</option>
+                    <option value="cmaes">CMA-ES (Evolutionary Policy Search)</option>
+                    <option value="astar_scan_ppo">A*+Scan+PPO (Hybrid RL)</option>
+                    <option value="qrdqn">QR-DQN (Quantile Regression DQN)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Train RL (for RL algorithms)</label>
+                <select id="trainPPO">
+                    <option value="false">No (Inference only)</option>
+                    <option value="true">Yes (Train while running)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Start Hour (0-23)</label>
+                <input type="number" id="startHour" value="9" min="0" max="23" step="0.5">
+            </div>
+            <div class="form-group">
+                <label>Duration (minutes)</label>
+                <input type="number" id="duration" value="60" min="1" max="1440">
+            </div>
+            <div class="form-group">
+                <label>Speed (ticks/sec)</label>
+                <input type="number" id="speed" value="10" min="1" max="1000">
+            </div>
+            <div class="form-group">
+                <label>Custom Arrival Rate (blank=realistic)</label>
+                <input type="text" id="customRate" placeholder="e.g. 5.0">
+            </div>
+            <div class="btn-row">
+                <button class="btn" onclick="startSim()">START</button>
+                <button class="btn" onclick="pauseSim()">PAUSE</button>
+                <button class="btn" onclick="resumeSim()">RESUME</button>
+                <button class="btn" onclick="stopSim()">STOP</button>
+                <button class="btn active" onclick="openAutoTrain()" title="Run 50+ training runs automatically">&#9654;&#9654; Auto Train</button>
+            </div>
+
+            <div class="burst-section">
+                <h3>Inject Passenger Burst</h3>
+                <div class="form-group">
+                    <label>Floor</label>
+                    <select id="burstFloor">
+                        {% for f in floors %}
+                        <option value="{{ f }}">{{ f }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Count</label>
+                    <input type="number" id="burstCount" value="30" min="1" max="200">
+                </div>
+                <div class="form-group">
+                    <label>Direction</label>
+                    <select id="burstDir">
+                        <option value="random">Random</option>
+                        <option value="up">Up</option>
+                        <option value="down">Down</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="injectBurst()">INJECT</button>
+            </div>
+
+            <!-- Past Runs -->
+            <div style="margin-top: 10px; border-top: 1px solid #ccc; padding-top: 8px;">
+                <h3>Past Runs</h3>
+                <div id="runsList"></div>
+            </div>
+        </div>
+
+        <!-- Visualization -->
+        <div class="viz">
+            <!-- Metrics Bar -->
+            <div class="metrics-bar">
+                <div class="metric">
+                    <div class="label">Tick</div>
+                    <div class="value" id="mTick">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Waiting</div>
+                    <div class="value" id="mWaiting">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Avg Wait (s)</div>
+                    <div class="value" id="mAvgWait">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Max Wait (s)</div>
+                    <div class="value" id="mMaxWait">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">P95 Wait (s)</div>
+                    <div class="value" id="mP95">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Delivered</div>
+                    <div class="value" id="mDelivered">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Throughput/min</div>
+                    <div class="value" id="mThroughput">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Energy</div>
+                    <div class="value" id="mEnergy">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Active Passengers</div>
+                    <div class="value" id="mActive">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Reward A</div>
+                    <div class="value" id="mRewardA">0</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Reward B</div>
+                    <div class="value" id="mRewardB">0</div>
+                </div>
+            </div>
+
+            <!-- Lift Shafts -->
+            <div class="banks">
+                <div class="bank panel">
+                    <h3>Bank A (Floors 8-13 + Common)</h3>
+                    <div class="shaft-container" id="bankA"></div>
+                </div>
+                <div class="bank panel">
+                    <h3>Bank B (Floors 2-7 + Common)</h3>
+                    <div class="shaft-container" id="bankB"></div>
+                </div>
+            </div>
+
+            <!-- Floor waiting chart -->
+            <div class="panel" style="max-height: 250px; overflow-y: auto;">
+                <h3>People Waiting Per Floor</h3>
+                <div id="floorChart"></div>
+            </div>
+
+            <!-- Time series charts -->
+            <div class="panel">
+                <h3>Metrics Over Time</h3>
+                <div class="tabs">
+                    <div class="tab active" onclick="showChart('waitChart')">Wait Time</div>
+                    <div class="tab" onclick="showChart('energyChart')">Energy</div>
+                    <div class="tab" onclick="showChart('throughputChart')">Throughput</div>
+                </div>
+                <canvas id="waitChart" class="chart-canvas tab-content active" width="800" height="200"></canvas>
+                <canvas id="energyChart" class="chart-canvas tab-content" width="800" height="200"></canvas>
+                <canvas id="throughputChart" class="chart-canvas tab-content" width="800" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Modal -->
+    <div class="modal-overlay" id="summaryModal" onclick="if(event.target===this)closeSummary()">
+        <div class="modal-box">
+            <h2 id="smTitle">Simulation Complete</h2>
+            <div class="modal-metrics" id="smMetrics"></div>
+            <div class="modal-btns">
+                <button class="btn" id="smReport">&#128196; View Full Report</button>
+                <button class="btn" id="smPdf">&#11015; Download PDF</button>
+                <button class="btn btn-danger" onclick="clearDB()">&#128465; Clear All Data</button>
+                <button class="btn" onclick="closeSummary()">&#10005; Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto Train Modal -->
+    <div class="modal-overlay" id="autoTrainModal" onclick="if(event.target===this)closeAutoTrain()">
+        <div class="modal-box" style="width:480px;">
+            <h2>&#9654;&#9654; Auto Train</h2>
+            <p style="color:#666;margin-bottom:14px;font-size:13px;">
+                Runs N sequential training simulations back-to-back. Weights are saved after each run and reloaded for the next, so the model accumulates experience continuously.
+            </p>
+            <div class="form-group">
+                <label>Algorithm</label>
+                <select id="atAlgorithm">
+                    <option value="ppo">PPO (recommended)</option>
+                    <option value="dqn">DQN</option>
+                    <option value="reinforce">REINFORCE</option>
+                    <option value="cmaes">CMA-ES</option>
+                    <option value="astar_scan_ppo">A*+Scan+PPO (Hybrid)</option>
+                    <option value="qrdqn">QR-DQN</option>
+                </select>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div class="form-group">
+                    <label>Number of Runs</label>
+                    <input type="number" id="atRuns" value="50" min="1" max="500">
+                </div>
+                <div class="form-group">
+                    <label>Duration per Run (min)</label>
+                    <input type="number" id="atDuration" value="60" min="1" max="1440">
+                </div>
+                <div class="form-group">
+                    <label>Speed (ticks/sec)</label>
+                    <input type="number" id="atSpeed" value="5000" min="100">
+                </div>
+                <div class="form-group">
+                    <label>Start Hour</label>
+                    <input type="number" id="atStartHour" value="8" min="0" max="23" step="0.5">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Base Run Name</label>
+                <input type="text" id="atBaseName" value="AutoTrain">
+            </div>
+
+            <!-- Progress bar -->
+            <div id="atProgress" style="margin:14px 0;">
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                    <span id="atProgressText" style="color:#555;">Not started</span>
+                    <span id="atProgressPct" style="font-weight:bold;">0%</span>
+                </div>
+                <div style="background:#eee;height:18px;border:1px solid #ccc;border-radius:2px;overflow:hidden;">
+                    <div id="atProgressBar" style="background:#3a3;height:100%;width:0%;transition:width 0.6s;"></div>
+                </div>
+                <div id="atEstimate" style="font-size:12px;color:#888;margin-top:3px;"></div>
+            </div>
+
+            <div class="modal-btns">
+                <button class="btn active" id="atStartBtn" onclick="startAutoTrain()">&#9654; Start Auto-Train</button>
+                <button class="btn btn-danger" id="atStopBtn" onclick="stopAutoTrain()" style="display:none;">&#9646;&#9646; Stop</button>
+                <button class="btn" onclick="closeAutoTrain()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const FLOORS = {{ floors | tojson }};
+    const NUM_FLOORS = FLOORS.length;
+    const LIFT_NAMES_A = ['A','B','C','D','E','F','G','H'];
+    const LIFT_NAMES_B = ['I','J','K','L','M','N','O','P'];
+    const STATE_NAMES = ['MOVING','DOOR_OPEN','IDLE','DECEL'];
+    const STATE_CLASSES = ['moving','door-open','idle','decel'];
+
+    // Bank A exclusive floors (indices for 8-13)
+    const BANK_A_EXCLUSIVE = new Set([16,17,18,19,20,21]); // indices for floors 8-13
+    const BANK_B_EXCLUSIVE = new Set([10,11,12,13,14,15]); // indices for floors 2-7
+
+    // Time series data
+    let tsData = { wait: [], energy: [], throughput: [], ticks: [] };
+    const MAX_POINTS = 300;
+
+    let pollTimer = null;
+    let currentRunId = null;
+    let wasRunning = false;
+
+    function buildShafts() {
+        buildBank('bankA', LIFT_NAMES_A, BANK_A_EXCLUSIVE);
+        buildBank('bankB', LIFT_NAMES_B, BANK_B_EXCLUSIVE);
+    }
+
+    function buildBank(containerId, liftNames, exclusiveFloors) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+
+        // Floor labels
+        const labels = document.createElement('div');
+        labels.className = 'floor-labels';
+        for (let f = 0; f < NUM_FLOORS; f++) {
+            const lbl = document.createElement('div');
+            lbl.className = 'floor-label';
+            lbl.textContent = FLOORS[f];
+            labels.appendChild(lbl);
+        }
+        container.appendChild(labels);
+
+        // Shafts
+        for (let li = 0; li < liftNames.length; li++) {
+            const shaft = document.createElement('div');
+            shaft.className = 'shaft';
+            shaft.title = 'Lift ' + liftNames[li];
+            for (let f = 0; f < NUM_FLOORS; f++) {
+                const cell = document.createElement('div');
+                cell.className = 'shaft-cell';
+                cell.id = containerId + '_' + li + '_' + f;
+                shaft.appendChild(cell);
+            }
+            container.appendChild(shaft);
+        }
+    }
+
+    function updateLifts(lifts, containerId) {
+        // Clear all cars first
+        const cells = document.querySelectorAll('#' + containerId + ' .shaft-cell');
+        cells.forEach(c => c.innerHTML = '');
+
+        if (!lifts) return;
+        lifts.forEach((lift, i) => {
+            const cellId = containerId + '_' + i + '_' + lift.floor;
+            const cell = document.getElementById(cellId);
+            if (!cell) return;
+            const car = document.createElement('div');
+            car.className = 'lift-car ' + STATE_CLASSES[lift.state];
+            if (lift.load >= 15) car.classList.add('full');
+            const dir = lift.direction > 0 ? '▲' : lift.direction < 0 ? '▼' : '■';
+            car.textContent = lift.name + dir + lift.load;
+            car.title = `Lift ${lift.name}: ${FLOORS[lift.floor]} | ${STATE_NAMES[lift.state]} | Load: ${lift.load}/15`;
+            cell.appendChild(car);
+        });
+    }
+
+    function updateFloorChart(floorWaiting) {
+        if (!floorWaiting) return;
+        const container = document.getElementById('floorChart');
+        let html = '';
+        const maxVal = Math.max(1, ...Object.values(floorWaiting));
+        for (let f = NUM_FLOORS - 1; f >= 0; f--) {
+            const name = FLOORS[f];
+            const count = floorWaiting[name] || 0;
+            const w = Math.max(1, (count / maxVal) * 300);
+            const color = count > 20 ? '#c44' : count > 10 ? '#ca4' : '#69c';
+            html += `<div class="floor-row">
+                <span class="fname">${name}</span>
+                <div class="bar" style="width:${w}px;background:${color}"></div>
+                <span class="count">${count}</span>
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function formatTime(seconds) {
+        const h = Math.floor(seconds / 3600) % 24;
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    function updateDashboard(data) {
+        if (!data || !data.tick && data.tick !== 0) return;
+
+        document.getElementById('mTick').textContent = data.tick;
+        document.getElementById('mWaiting').textContent = data.total_waiting || 0;
+
+        const avgW = (data.avg_wait || 0).toFixed(1);
+        const el = document.getElementById('mAvgWait');
+        el.textContent = avgW;
+        el.className = 'value' + (avgW > 60 ? ' bad' : avgW > 30 ? ' warn' : '');
+
+        const maxW = (data.max_wait || 0).toFixed(0);
+        const mel = document.getElementById('mMaxWait');
+        mel.textContent = maxW;
+        mel.className = 'value' + (maxW > 120 ? ' bad' : maxW > 60 ? ' warn' : '');
+
+        document.getElementById('mP95').textContent = (data.p95_wait || 0).toFixed(1);
+        document.getElementById('mDelivered').textContent = data.total_delivered || 0;
+        document.getElementById('mThroughput').textContent = data.throughput_per_min || 0;
+        document.getElementById('mEnergy').textContent = (data.total_energy || 0).toFixed(0);
+        document.getElementById('mActive').textContent = data.active_passengers || 0;
+        document.getElementById('mRewardA').textContent = (data.cumulative_reward_a || 0).toFixed(1);
+        document.getElementById('mRewardB').textContent = (data.cumulative_reward_b || 0).toFixed(1);
+
+        const statusEl = document.getElementById('statusLabel');
+        if (data.running && !data.paused) {
+            statusEl.textContent = 'RUNNING (' + data.algorithm + ')';
+            statusEl.className = 'status running';
+        } else if (data.paused) {
+            statusEl.textContent = 'PAUSED';
+            statusEl.className = 'status paused';
+        } else {
+            statusEl.textContent = 'STOPPED';
+            statusEl.className = 'status stopped';
+        }
+
+        if (data.sim_time_seconds !== undefined) {
+            document.getElementById('simTime').textContent = formatTime(data.sim_time_seconds);
+        }
+
+        updateLifts(data.bank_a_lifts, 'bankA');
+        updateLifts(data.bank_b_lifts, 'bankB');
+        updateFloorChart(data.floor_waiting);
+
+        // Time series
+        tsData.ticks.push(data.tick);
+        tsData.wait.push(data.avg_wait || 0);
+        tsData.energy.push(data.tick_energy || 0);
+        tsData.throughput.push(data.throughput_per_min || 0);
+        if (tsData.ticks.length > MAX_POINTS) {
+            tsData.ticks.shift(); tsData.wait.shift();
+            tsData.energy.shift(); tsData.throughput.shift();
+        }
+        drawChart('waitChart', tsData.ticks, tsData.wait, 'Avg Wait (s)', '#c44');
+        drawChart('energyChart', tsData.ticks, tsData.energy, 'Energy/tick', '#44c');
+        drawChart('throughputChart', tsData.ticks, tsData.throughput, 'Throughput/min', '#4a4');
+    }
+
+    function drawChart(canvasId, xs, ys, label, color) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        // Skip drawing if the canvas is not visible (inline or computed style)
+        const computed = window.getComputedStyle(canvas);
+        if (computed.display === 'none') return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (ys.length < 2) return;
+
+        const maxY = Math.max(1, ...ys) * 1.1;
+        const minX = xs[0], maxX = xs[xs.length - 1];
+        const rangeX = Math.max(maxX - minX, 1);
+
+        // Grid
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = H - (i / 4) * H;
+            ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W, y); ctx.stroke();
+            ctx.fillStyle = '#999'; ctx.font = '10px monospace';
+            ctx.fillText((maxY * i / 4).toFixed(1), 2, y + 4);
+        }
+
+        // Line
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < ys.length; i++) {
+            const x = 40 + ((xs[i] - minX) / rangeX) * (W - 50);
+            const y = H - (ys[i] / maxY) * H;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = color; ctx.font = 'bold 12px monospace';
+        ctx.fillText(label + ': ' + ys[ys.length - 1].toFixed(1), 50, 15);
+    }
+
+    function showChart(id) {
+        document.querySelectorAll('.chart-canvas').forEach(c => { c.style.display = 'none'; c.classList.remove('active'); });
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        const el = document.getElementById(id);
+        el.style.display = 'block'; el.classList.add('active');
+        event.target.classList.add('active');
+        // Redraw immediately so switching tabs after sim stops still shows data
+        if (id === 'waitChart')       drawChart('waitChart',       tsData.ticks, tsData.wait,       'Avg Wait (s)',    '#c44');
+        else if (id === 'energyChart')     drawChart('energyChart',     tsData.ticks, tsData.energy,    'Energy/tick',     '#44c');
+        else if (id === 'throughputChart') drawChart('throughputChart', tsData.ticks, tsData.throughput,'Throughput/min',  '#4a4');
+    }
+
+    async function startSim() {
+        const customRate = document.getElementById('customRate').value;
+        const body = {
+            name: document.getElementById('simName').value,
+            algorithm: document.getElementById('algorithm').value,
+            duration: document.getElementById('duration').value,
+            start_hour: document.getElementById('startHour').value,
+            speed: document.getElementById('speed').value,
+            train_ppo: document.getElementById('trainPPO').value === 'true',
+        };
+        if (customRate) body.custom_arrival_rate = customRate;
+
+        tsData = { wait: [], energy: [], throughput: [], ticks: [] };
+        const startResp = await fetch('/api/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const startData = await startResp.json();
+        currentRunId = startData.run_id || null;
+        startPolling();
+    }
+
+    async function stopSim() { await fetch('/api/stop', { method: 'POST' }); }
+    async function pauseSim() { await fetch('/api/pause', { method: 'POST' }); }
+    async function resumeSim() { await fetch('/api/resume', { method: 'POST' }); }
+
+    async function injectBurst() {
+        const body = {
+            floor: document.getElementById('burstFloor').value,
+            count: document.getElementById('burstCount').value,
+            direction: document.getElementById('burstDir').value
+        };
+        await fetch('/api/burst', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    }
+
+    function startPolling() {
+        stopPolling();
+        wasRunning = false;
+        pollTimer = setInterval(async () => {
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                updateDashboard(data);
+                if (!data.running && !data.paused) {
+                    stopPolling();
+                    loadRuns();
+                    if (wasRunning) showSummaryModal(data);
+                    wasRunning = false;
+                } else if (data.running) {
+                    wasRunning = true;
+                }
+            } catch(e) {}
+        }, 500);
+    }
+
+    function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+    async function loadRuns() {
+        try {
+            const res = await fetch('/api/runs');
+            const runs = await res.json();
+            const el = document.getElementById('runsList');
+            if (!runs.length) {
+                el.innerHTML = '<div style="font-size:13px;color:#999;padding:4px 0;">No runs yet.</div>';
+                return;
+            }
+            el.innerHTML = runs.map(r => `
+                <div class="run-item">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="run-name" onclick="viewRun(${r.id})" style="cursor:pointer;">${r.name}</span>
+                        <a href="/results/${r.id}" target="_blank" style="font-size:13px;color:#55a;text-decoration:none;" title="View Report">&#128196; Report</a>
+                    </div>
+                    <div>${r.algorithm} | ${Math.round(r.sim_duration_ticks/60)}min | ${r.status}${r.mean_avg_wait != null ? ' | Avg:' + r.mean_avg_wait + 's' : ''}</div>
+                </div>
+            `).join('') +
+            `<button class="btn" style="margin-top:8px;width:100%;font-size:13px;" onclick="clearDB()">&#128465; Clear All Runs</button>`;
+        } catch(e) {}
+    }
+
+    function showSummaryModal(data) {
+        const algoLabels = {
+            scan: 'SCAN', nearest: 'Nearest First', astar: 'A* Dispatch',
+            astar_scan: 'A*+Scan', ppo: 'PPO', dqn: 'DQN', reinforce: 'REINFORCE',
+            qlearning: 'Q-Learning', cmaes: 'CMA-ES', roundrobin: 'Round-Robin',
+            idlewait: 'Idle-Wait', astar_scan_ppo: 'A*+Scan+PPO', qrdqn: 'QR-DQN'
+        };
+        document.getElementById('smTitle').textContent =
+            'Run Complete \u2014 ' + (algoLabels[data.algorithm] || data.algorithm || 'Simulation');
+
+        const avgW = data.avg_wait || 0;
+        const maxW = data.max_wait || 0;
+        const rows = [
+            ['Passengers Delivered',  data.total_delivered || 0,                         ''],
+            ['Active (remaining)',     data.active_passengers || 0,                       ''],
+            ['Avg Wait',              avgW.toFixed(1) + ' s',   avgW > 60 ? 'bad' : avgW > 30 ? 'warn' : 'good'],
+            ['Max Wait',              maxW.toFixed(0) + ' s',   maxW > 120 ? 'bad' : maxW > 60 ? 'warn' : 'good'],
+            ['P95 Wait',              (data.p95_wait || 0).toFixed(1) + ' s',             ''],
+            ['Throughput',            (data.throughput_per_min || 0) + ' / min',          ''],
+            ['Total Energy',          (data.total_energy || 0).toFixed(0) + ' units',     ''],
+            ['Reward A (Bank A)',     (data.cumulative_reward_a || 0).toFixed(1),          ''],
+            ['Reward B (Bank B)',     (data.cumulative_reward_b || 0).toFixed(1),          ''],
+            ['Duration',             (data.tick || 0) + ' ticks (' + Math.round((data.tick||0)/60) + ' min)', ''],
+        ];
+        document.getElementById('smMetrics').innerHTML = rows.map(([k, v, cls]) =>
+            `<div class="mm-cell"><div class="mk">${k}</div><div class="mv ${cls}">${v}</div></div>`
+        ).join('');
+
+        document.getElementById('smReport').onclick = () => {
+            if (currentRunId) window.open('/results/' + currentRunId, '_blank');
+        };
+        document.getElementById('smPdf').onclick = () => {
+            if (currentRunId) window.open('/results/' + currentRunId, '_blank');
+        };
+        document.getElementById('summaryModal').classList.add('open');
+    }
+
+    function closeSummary() {
+        document.getElementById('summaryModal').classList.remove('open');
+    }
+
+    async function clearDB() {
+        if (!confirm('Delete ALL simulation runs and data? This cannot be undone.')) return;
+        await fetch('/api/db/clear', { method: 'POST' });
+        closeSummary();
+        loadRuns();
+    }
+
+    async function viewRun(runId) {
+        try {
+            const res = await fetch(`/api/runs/${runId}/stats?sample=5`);
+            const stats = await res.json();
+            if (!stats.length) return;
+
+            tsData = { wait: [], energy: [], throughput: [], ticks: [] };
+            stats.forEach(s => {
+                tsData.ticks.push(s.tick);
+                tsData.wait.push(s.avg_wait || 0);
+                tsData.energy.push(s.tick_energy || 0);
+                tsData.throughput.push(s.throughput_per_min || 0);
+            });
+            const last = stats[stats.length - 1];
+            document.getElementById('mTick').textContent = last.tick;
+            document.getElementById('mWaiting').textContent = last.total_waiting;
+            document.getElementById('mAvgWait').textContent = (last.avg_wait || 0).toFixed(1);
+            document.getElementById('mMaxWait').textContent = (last.max_wait || 0).toFixed(0);
+            document.getElementById('mDelivered').textContent = last.total_delivered;
+            document.getElementById('mEnergy').textContent = (last.total_energy || 0).toFixed(0);
+
+            drawChart('waitChart', tsData.ticks, tsData.wait, 'Avg Wait (s)', '#c44');
+            drawChart('energyChart', tsData.ticks, tsData.energy, 'Energy/tick', '#44c');
+            drawChart('throughputChart', tsData.ticks, tsData.throughput, 'Throughput/min', '#4a4');
+        } catch(e) {}
+    }
+
+    // Init
+    buildShafts();
+    loadRuns();
+    // Show only wait chart by default
+    document.querySelectorAll('.chart-canvas').forEach(c => c.style.display = 'none');
+    document.getElementById('waitChart').style.display = 'block';
+
+    // ─── Auto Train ───────────────────────────────────────────────────────────
+    let autoTrainTimer = null;
+    let atStartTime = null;
+
+    function openAutoTrain() {
+        document.getElementById('autoTrainModal').classList.add('open');
+        pollAutoTrainStatus();
+    }
+
+    function closeAutoTrain() {
+        document.getElementById('autoTrainModal').classList.remove('open');
+    }
+
+    async function startAutoTrain() {
+        const config = {
+            algorithm:   document.getElementById('atAlgorithm').value,
+            n_runs:      parseInt(document.getElementById('atRuns').value),
+            duration:    parseInt(document.getElementById('atDuration').value),
+            speed:       parseInt(document.getElementById('atSpeed').value),
+            start_hour:  parseFloat(document.getElementById('atStartHour').value),
+            base_name:   document.getElementById('atBaseName').value,
+        };
+        const res = await fetch('/api/auto_train', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+
+        atStartTime = Date.now();
+        document.getElementById('atStartBtn').style.display = 'none';
+        document.getElementById('atStopBtn').style.display = '';
+        startPolling();
+        pollAutoTrainStatus();
+    }
+
+    async function stopAutoTrain() {
+        await fetch('/api/auto_train/stop', { method: 'POST' });
+    }
+
+    function pollAutoTrainStatus() {
+        if (autoTrainTimer) clearInterval(autoTrainTimer);
+        autoTrainTimer = setInterval(async () => {
+            try {
+                const res = await fetch('/api/auto_train/status');
+                const data = await res.json();
+
+                const cur = data.current || 0;
+                const tot = data.total || 1;
+                const pct = Math.round(cur / tot * 100);
+
+                document.getElementById('atProgressBar').style.width = pct + '%';
+                document.getElementById('atProgressPct').textContent = pct + '%';
+
+                const simLabel = data.sim_running ? ' ⏳ running...' : '';
+                if (data.running) {
+                    document.getElementById('atProgressText').textContent =
+                        `Run ${cur} / ${tot} — ${data.algorithm.toUpperCase()}${simLabel}`;
+                    // Estimate time remaining
+                    if (atStartTime && cur > 0) {
+                        const elapsed = (Date.now() - atStartTime) / 1000;
+                        const perRun = elapsed / cur;
+                        const remaining = Math.round(perRun * (tot - cur));
+                        const hh = Math.floor(remaining / 3600);
+                        const mm = Math.floor((remaining % 3600) / 60);
+                        document.getElementById('atEstimate').textContent =
+                            `~${hh > 0 ? hh + 'h ' : ''}${mm}m remaining`;
+                    }
+                } else {
+                    clearInterval(autoTrainTimer);
+                    autoTrainTimer = null;
+                    document.getElementById('atStartBtn').style.display = '';
+                    document.getElementById('atStopBtn').style.display = 'none';
+                    if (cur > 0) {
+                        document.getElementById('atProgressText').textContent =
+                            `✓ Completed ${cur} / ${tot} runs`;
+                        document.getElementById('atEstimate').textContent = 'Done!';
+                    }
+                    loadRuns();
+                }
+            } catch(e) {}
+        }, 1000);
+    }
+    </script>
+</body>
+</html>

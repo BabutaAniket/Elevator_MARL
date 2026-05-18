@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Report — {{ summary.get('name', 'Run #' ~ run_id) }}</title>
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #fff; }
+            .page { box-shadow: none; margin: 0; max-width: 100%; padding: 10px 20px; }
+            canvas { page-break-inside: avoid; }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Verdana, Geneva, sans-serif; background: #e8e8e8; color: #222; font-size: 15px; }
+        .page { max-width: 960px; margin: 20px auto; background: #fff; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,0.18); }
+
+        .report-header { border-bottom: 3px solid #333; padding-bottom: 12px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: flex-start; }
+        .report-header h1 { font-size: 24px; }
+        .report-header .logo { font-size: 13px; color: #888; text-align: right; }
+
+        h2 { font-size: 15px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border-left: 4px solid #333; padding-left: 8px; margin: 22px 0 10px; }
+
+        .meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 18px; }
+        .meta-cell { background: #f5f5f5; border: 1px solid #ddd; padding: 6px 10px; }
+        .meta-cell .mk { font-size: 12px; color: #888; }
+        .meta-cell .mv { font-size: 15px; font-weight: bold; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 14px; }
+        thead th { background: #333; color: #fff; padding: 7px 10px; text-align: left; font-weight: normal; }
+        tbody td { padding: 6px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+        tbody tr:nth-child(even) td { background: #fafafa; }
+        .good { color: #2a7a2a; font-weight: bold; }
+        .warn { color: #a06000; font-weight: bold; }
+        .bad  { color: #b00020; font-weight: bold; }
+
+        .chart-wrap { margin-bottom: 18px; }
+        .chart-wrap canvas { width: 100%; border: 1px solid #eee; display: block; background: #fff; }
+        .chart-label { font-size: 13px; color: #666; margin-bottom: 4px; }
+
+        .btn-row { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+        .btn { padding: 8px 18px; border: 1px solid #333; background: #333; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; text-decoration: none; display: inline-block; }
+        .btn.outline { background: #fff; color: #333; }
+        .btn:hover { opacity: 0.82; }
+
+        .footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #eee; font-size: 12px; color: #aaa; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <div class="no-print btn-row">
+        <button class="btn" onclick="printReport()">&#11015; Download PDF / Print</button>
+        <a class="btn outline" href="/">&#8592; Back to Simulator</a>
+    </div>
+
+    <div class="report-header">
+        <div>
+            <h1>Simulation Report</h1>
+            <div style="font-size:16px; margin-top:4px; color:#555;">{{ summary.get('name', 'Run #' ~ run_id) }}</div>
+        </div>
+        <div class="logo">
+            Lift RL Simulator<br>
+            Run #{{ run_id }}<br>
+            {{ summary.get('start_time', '')[:10] }}
+        </div>
+    </div>
+
+    <h2>Configuration</h2>
+    {% set algo_labels = {
+        'scan':      'SCAN (Baseline)',
+        'nearest':   'Nearest First (Baseline)',
+        'roundrobin': 'Round-Robin (Baseline)',
+        'idlewait':  'Idle-Wait (Baseline)',
+        'astar':     'A* Dispatch (Heuristic)',
+        'astar_scan': 'A* + Scan Hybrid (Heuristic)',
+        'ppo':       'PPO — Proximal Policy Optimisation',
+        'dqn':       'DQN — Deep Q-Network',
+        'reinforce': 'REINFORCE — Policy Gradient',
+        'qlearning': 'Q-Learning (Tabular RL)',
+        'cmaes':     'CMA-ES (Evolutionary)',
+        'astar_scan_ppo': 'A*+Scan+PPO (Hybrid RL)',
+        'qrdqn':     'QR-DQN — Quantile Regression DQN'
+    } %}
+    <div class="meta-grid">
+        <div class="meta-cell"><div class="mk">Algorithm</div><div class="mv">{{ algo_labels.get(summary.get('algorithm',''), summary.get('algorithm','—')) }}</div></div>
+        <div class="meta-cell"><div class="mk">Sim Start Hour</div><div class="mv">{{ summary.get('sim_start_hour', 9) | int }}:00</div></div>
+        <div class="meta-cell"><div class="mk">Duration</div><div class="mv">{{ (summary.get('sim_duration_ticks', 0) // 60) }} min ({{ summary.get('sim_duration_ticks', 0) }} ticks)</div></div>
+        <div class="meta-cell"><div class="mk">Speed Multiplier</div><div class="mv">{{ summary.get('speed_multiplier', 1) | int }}× ticks/sec</div></div>
+        <div class="meta-cell"><div class="mk">Custom Arrival Rate</div><div class="mv">{{ summary.get('custom_arrival_rate') or 'Realistic (auto)' }}</div></div>
+        <div class="meta-cell"><div class="mk">Status</div><div class="mv">{{ summary.get('status', '—') | upper }}</div></div>
+        <div class="meta-cell"><div class="mk">Started</div><div class="mv">{{ summary.get('start_time', '—')[:19].replace('T', ' ') }}</div></div>
+        <div class="meta-cell"><div class="mk">Ended</div><div class="mv">{{ summary.get('end_time', '—')[:19].replace('T', ' ') if summary.get('end_time') else '—' }}</div></div>
+    </div>
+
+    <h2>Key Performance Metrics</h2>
+    {% set d = summary.get('total_delivered', 0) or 0 %}
+    {% set maw = summary.get('mean_avg_wait', 0) or 0 %}
+    {% set pmw = summary.get('peak_max_wait', 0) or 0 %}
+    {% set mp95 = summary.get('mean_p95_wait', 0) or 0 %}
+    {% set thr = summary.get('avg_throughput', 0) or 0 %}
+    {% set pw = summary.get('peak_waiting', 0) or 0 %}
+    {% set energy = summary.get('total_energy', 0) or 0 %}
+    <table>
+        <thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Assessment</th><th>Description</th></tr></thead>
+        <tbody>
+            <tr>
+                <td>Total Passengers Delivered</td>
+                <td class="good">{{ d }}</td>
+                <td>persons</td>
+                <td>—</td>
+                <td>Passengers that reached their destination floor</td>
+            </tr>
+            <tr>
+                <td>Mean Avg Wait Time</td>
+                <td class="{{ 'bad' if maw > 60 else 'warn' if maw > 30 else 'good' }}">{{ '%.1f' | format(maw) }}</td>
+                <td>seconds</td>
+                <td>{{ 'Poor (&gt;60s)' if maw > 60 else 'Fair (30–60s)' if maw > 30 else 'Good (&lt;30s)' }}</td>
+                <td>Average wait time per polling sample, averaged over the run</td>
+            </tr>
+            <tr>
+                <td>Peak Max Wait Time</td>
+                <td class="{{ 'bad' if pmw > 120 else 'warn' if pmw > 60 else 'good' }}">{{ '%.0f' | format(pmw) }}</td>
+                <td>seconds</td>
+                <td>{{ 'Poor (&gt;120s)' if pmw > 120 else 'Fair (60–120s)' if pmw > 60 else 'Good (&lt;60s)' }}</td>
+                <td>Single longest wait recorded across the entire run</td>
+            </tr>
+            <tr>
+                <td>Mean P95 Wait Time</td>
+                <td>{{ '%.1f' | format(mp95) }}</td>
+                <td>seconds</td>
+                <td>—</td>
+                <td>95th-percentile wait, averaged over all sample ticks</td>
+            </tr>
+            <tr>
+                <td>Average Throughput</td>
+                <td>{{ '%.1f' | format(thr) }}</td>
+                <td>persons / min</td>
+                <td>—</td>
+                <td>Passengers delivered per simulated minute (60-tick rolling window)</td>
+            </tr>
+            <tr>
+                <td>Peak Concurrent Waiting</td>
+                <td class="{{ 'bad' if pw > 50 else 'warn' if pw > 20 else 'good' }}">{{ pw }}</td>
+                <td>persons</td>
+                <td>{{ 'High (&gt;50)' if pw > 50 else 'Moderate (20–50)' if pw > 20 else 'Low (&lt;20)' }}</td>
+                <td>Most passengers simultaneously waiting at floor call buttons</td>
+            </tr>
+            <tr>
+                <td>Total Energy Consumed</td>
+                <td>{{ '%.0f' | format(energy) }}</td>
+                <td>energy units</td>
+                <td>—</td>
+                <td>Move = 1.0 + 0.1×load; Door open = 2.0; Deceleration = 2.0</td>
+            </tr>
+            <tr>
+                <td>Data Samples Recorded</td>
+                <td>{{ summary.get('sample_count', 0) }}</td>
+                <td>ticks sampled</td>
+                <td>—</td>
+                <td>DB saves every 10 ticks; charts use every 5th sample</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Wait Time Over Simulation</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">Average passenger wait time (seconds) — sampled every 10 ticks</div>
+        <canvas id="waitChart" width="900" height="180"></canvas>
+    </div>
+
+    <h2>Energy Per Tick</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">Energy consumed each tick (arbitrary units) — moving lifts + door operations</div>
+        <canvas id="energyChart" width="900" height="180"></canvas>
+    </div>
+
+    <h2>Throughput Per Minute</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">Passengers delivered in the rolling last-60-tick window</div>
+        <canvas id="throughputChart" width="900" height="180"></canvas>
+    </div>
+
+    <div class="footer">
+        <span>Lift RL Simulator — Run #{{ run_id }} — {{ summary.get('algorithm', '') | upper }}</span>
+        <span>Generated {{ summary.get('end_time', summary.get('start_time', ''))[:19].replace('T', ' ') }}</span>
+    </div>
+</div>
+
+<script>
+const RUN_ID = {{ run_id }};
+
+function drawChart(canvasId, xs, ys, label, color) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    if (!ys.length || ys.length < 2) {
+        ctx.fillStyle = '#bbb'; ctx.font = '13px Verdana, sans-serif';
+        ctx.fillText('No data recorded', 10, H / 2); return;
+    }
+    const maxY = Math.max(1, ...ys) * 1.1;
+    const minX = xs[0], maxX = xs[xs.length - 1];
+    const rangeX = Math.max(maxX - minX, 1);
+    const PAD_L = 50, PAD_R = 10, PAD_T = 22, PAD_B = 5;
+
+    // Grid
+    ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - i / 4);
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
+        ctx.fillStyle = '#999'; ctx.font = '11px Verdana, sans-serif';
+        ctx.fillText((maxY * i / 4).toFixed(1), 2, y + 4);
+    }
+
+    // Fill area
+    ctx.beginPath();
+    for (let i = 0; i < ys.length; i++) {
+        const x = PAD_L + ((xs[i] - minX) / rangeX) * (W - PAD_L - PAD_R);
+        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - ys[i] / maxY);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    const lastX = PAD_L + ((xs[xs.length-1] - minX) / rangeX) * (W - PAD_L - PAD_R);
+    const firstX = PAD_L;
+    ctx.lineTo(lastX, H - PAD_B); ctx.lineTo(firstX, H - PAD_B); ctx.closePath();
+    ctx.fillStyle = color + '22';
+    ctx.fill();
+
+    // Line
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < ys.length; i++) {
+        const x = PAD_L + ((xs[i] - minX) / rangeX) * (W - PAD_L - PAD_R);
+        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - ys[i] / maxY);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = color; ctx.font = 'bold 12px Verdana, sans-serif';
+    ctx.fillText(label + '  (final: ' + ys[ys.length-1].toFixed(1) + '  peak: ' + Math.max(...ys).toFixed(1) + ')', PAD_L + 4, 15);
+}
+
+async function loadCharts() {
+    try {
+        const res = await fetch('/api/runs/' + RUN_ID + '/stats?sample=5');
+        const stats = await res.json();
+        if (!stats || !stats.length) return;
+        const ticks = stats.map(s => s.tick);
+        drawChart('waitChart',       ticks, stats.map(s => s.avg_wait || 0),          'Avg Wait (s)',   '#c44');
+        drawChart('energyChart',     ticks, stats.map(s => s.tick_energy || 0),        'Energy / tick',  '#448');
+        drawChart('throughputChart', ticks, stats.map(s => s.throughput_per_min || 0), 'Throughput/min', '#4a4');
+    } catch(e) { console.error(e); }
+}
+
+function printReport() {
+    // Convert canvases to images so they survive printing
+    const conversions = [];
+    document.querySelectorAll('canvas').forEach(canvas => {
+        const img = document.createElement('img');
+        img.src = canvas.toDataURL('image/png');
+        img.style.cssText = canvas.style.cssText;
+        img.style.width = '100%';
+        img.className = '_print_img';
+        canvas.parentNode.insertBefore(img, canvas);
+        canvas.style.display = 'none';
+        conversions.push({ canvas, img });
+    });
+    window.print();
+    // Restore after print dialog closes
+    conversions.forEach(({ canvas, img }) => {
+        canvas.style.display = '';
+        img.remove();
+    });
+}
+
+loadCharts();
+</script>
+</body>
+</html>
