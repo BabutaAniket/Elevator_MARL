@@ -172,6 +172,10 @@ class BuildingEnvironment:
         self.tick_deliveries_b = 0
         self.tick_energy = 0.0
 
+        # Set False for pure baseline algorithms (SCAN, Nearest, Round-Robin,
+        # IdleWait) so the urgency dispatcher does not hijack their lifts.
+        self.urgency_dispatch_enabled = True
+
     def reset(self):
         self.__init__()
         return self.get_state('A'), self.get_state('B')
@@ -194,6 +198,10 @@ class BuildingEnvironment:
         if bank is None:
             return None
 
+        # Prevent "Passenger Death Spiral" by capping waiting passengers per floor
+        if len(bank.hall_calls[origin]) > 20:
+            return None  # Floor is too crowded, passenger gives up and takes stairs
+
         p.assigned_bank = bank.bank_id
         bank.hall_calls[origin].append(p)
         self.active_passengers.append(p)
@@ -214,7 +222,7 @@ class BuildingEnvironment:
             return self.bank_b
         return None
 
-    def step(self, actions_a: List[int], actions_b: List[int]) -> Tuple[float, float]:
+    def step(self, actions_a: List[int], actions_b: List[int]) -> Tuple[float, float, List[int], List[int]]:
         self.tick_pickups = 0
         self.tick_deliveries = 0
         self.tick_pickups_a = 0
@@ -222,6 +230,10 @@ class BuildingEnvironment:
         self.tick_pickups_b = 0
         self.tick_deliveries_b = 0
         self.tick_energy = 0.0
+        self.tick_lift_deliveries_a = [0] * NUM_LIFTS_PER_BANK
+        self.tick_lift_deliveries_b = [0] * NUM_LIFTS_PER_BANK
+        self.tick_lift_pickups_a = [0] * NUM_LIFTS_PER_BANK
+        self.tick_lift_pickups_b = [0] * NUM_LIFTS_PER_BANK
 
         safe_a = self._apply_safety_filter(self.bank_a, actions_a)
         safe_b = self._apply_safety_filter(self.bank_b, actions_b)
@@ -242,7 +254,32 @@ class BuildingEnvironment:
                     lift.hour_energy = 0.0
                     lift.hour_start_tick = self.tick
 
-        return reward_a, reward_b
+        return reward_a, reward_b, safe_a, safe_b
+
+    def get_per_lift_rewards(self, bank: LiftBank) -> List[float]:
+        """Per-lift reward for credit assignment. Only rewards the lift that did the work."""
+        bid = bank.bank_id
+        d_list = self.tick_lift_deliveries_a if bid == 'A' else self.tick_lift_deliveries_b
+        p_list = self.tick_lift_pickups_a if bid == 'A' else self.tick_lift_pickups_b
+        rewards = []
+        for i, lift in enumerate(bank.lifts):
+            energy = -0.01 * (1 + lift.load * 0.1) if lift.state == LiftState.MOVING else 0.0
+            # Dense proximity shaping: reward being close to the most-urgent caller.
+            # Gives non-zero gradient on navigation decisions, not just on rare deliveries.
+            shaping = 0.0
+            if not lift.passengers:  # empty lift — learn where to go
+                best_wait = -1
+                best_dist = 1
+                for f, callers in bank.hall_calls.items():
+                    if callers and f in lift.accessible_floors:
+                        w = max(self.tick - p.arrival_time for p in callers)
+                        if w > best_wait:
+                            best_wait = w
+                            best_dist = max(abs(lift.floor - f), 1)
+                if best_wait >= 0:
+                    shaping = 0.5 / best_dist  # 0.5 at same floor, tapers off with distance
+            rewards.append(30.0 * d_list[i] + 10.0 * p_list[i] + energy + shaping)
+        return rewards
 
     def _apply_safety_filter(self, bank: LiftBank, actions: List[int]) -> List[int]:
         safe = list(actions)
@@ -266,31 +303,52 @@ class BuildingEnvironment:
                     if (self.tick - lift.last_reversal_tick) < DIRECTION_REVERSAL_COOLDOWN:
                         safe[i] = int(LiftAction.IDLE)
 
-        urgent_floors = set()
-        for f, plist in bank.hall_calls.items():
-            for p in plist:
-                w = self.tick - p.arrival_time
-                if w >= MAX_WAIT_BOUND - 15 or (p.priority and w >= 15):
-                    urgent_floors.add(f)
-                    break
+        # Opportunistic pickup: if an EMPTY lift is at a floor with waiting passengers,
+        # stop immediately. Restricted to truly empty lifts to avoid disrupting lifts
+        # that are already en route to their passengers' destinations.
+        for i, lift in enumerate(bank.lifts):
+            if lift.state in (LiftState.DOOR_OPEN, LiftState.DECELERATING):
+                continue
+            if lift.passengers or lift.destinations or lift.is_full:
+                continue  # only apply to truly empty lifts
+            if lift.floor not in accessible:
+                continue
+            pickable = any(p.destination in accessible
+                           for p in bank.hall_calls.get(lift.floor, []))
+            if pickable:
+                safe[i] = int(LiftAction.STOP_OPEN)
 
-        if urgent_floors:
-            idle_lifts = [(i, bank.lifts[i]) for i in range(NUM_LIFTS_PER_BANK)
-                          if bank.lifts[i].state == LiftState.IDLE
-                          and bank.lifts[i].load == 0
-                          and not bank.lifts[i].destinations
-                          and LiftAction(safe[i]) == LiftAction.IDLE]
-            for uf in urgent_floors:
-                if not idle_lifts:
-                    break
-                idle_lifts.sort(key=lambda x: abs(x[1].floor - uf))
-                idx, lift = idle_lifts.pop(0)
-                if uf > lift.floor:
-                    safe[idx] = int(LiftAction.MOVE_UP)
-                elif uf < lift.floor:
-                    safe[idx] = int(LiftAction.MOVE_DOWN)
-                else:
-                    safe[idx] = int(LiftAction.STOP_OPEN)
+        if self.urgency_dispatch_enabled:
+            urgent_floors = set()
+            for f, plist in bank.hall_calls.items():
+                for p in plist:
+                    w = self.tick - p.arrival_time
+                    if w >= 20 or (p.priority and w >= 10):
+                        urgent_floors.add(f)
+                        break
+
+            if urgent_floors:
+                idle_lifts = [(i, bank.lifts[i]) for i in range(NUM_LIFTS_PER_BANK)
+                              if bank.lifts[i].state == LiftState.IDLE
+                              and bank.lifts[i].load == 0
+                              and not bank.lifts[i].destinations
+                              and LiftAction(safe[i]) == LiftAction.IDLE
+                              # Skip lifts in reversal cooldown; they will naturally
+                              # complete their direction change next tick without
+                              # being hijacked by urgency dispatch.
+                              and (self.tick - bank.lifts[i].last_reversal_tick)
+                                  >= DIRECTION_REVERSAL_COOLDOWN]
+                for uf in urgent_floors:
+                    if not idle_lifts:
+                        break
+                    idle_lifts.sort(key=lambda x: abs(x[1].floor - uf))
+                    idx, lift = idle_lifts.pop(0)
+                    if uf > lift.floor:
+                        safe[idx] = int(LiftAction.MOVE_UP)
+                    elif uf < lift.floor:
+                        safe[idx] = int(LiftAction.MOVE_DOWN)
+                    else:
+                        safe[idx] = int(LiftAction.STOP_OPEN)
 
         return safe
 
@@ -363,6 +421,8 @@ class BuildingEnvironment:
         self.tick_energy += 2.0
         lift.hour_energy += 2.0
 
+        lift_idx = bank.lifts.index(lift)
+
         alighting = [p for p in lift.passengers if p.destination == lift.floor]
         for p in alighting:
             p.alight_time = self.tick
@@ -375,8 +435,10 @@ class BuildingEnvironment:
             bank.recent_waits.append(wait)
             if bank.bank_id == 'A':
                 self.tick_deliveries_a += 1
+                self.tick_lift_deliveries_a[lift_idx] += 1
             else:
                 self.tick_deliveries_b += 1
+                self.tick_lift_deliveries_b[lift_idx] += 1
 
         waiting = bank.hall_calls[lift.floor][:]
         priority_first = sorted(waiting, key=lambda p: (
@@ -400,9 +462,20 @@ class BuildingEnvironment:
             self.tick_pickups += 1
             if bank.bank_id == 'A':
                 self.tick_pickups_a += 1
+                self.tick_lift_pickups_a[lift_idx] += 1
             else:
                 self.tick_pickups_b += 1
+                self.tick_lift_pickups_b[lift_idx] += 1
             boarded += 1
+            # After the first passenger boards into an empty lift, immediately update
+            # the lift's direction so subsequent passengers with the same desired
+            # direction can also pass the directional boarding check above.
+            if boarded == 1 and len(lift.passengers) == 1:
+                dest = lift.passengers[0].destination
+                if dest > lift.floor:
+                    lift.direction = Direction.UP
+                elif dest < lift.floor:
+                    lift.direction = Direction.DOWN
 
         if lift.passengers and lift.direction == Direction.IDLE:
             avg_dest = sum(p.destination for p in lift.passengers) / len(lift.passengers)
@@ -422,8 +495,9 @@ class BuildingEnvironment:
             deliveries = self.tick_deliveries_b
             pickups = self.tick_pickups_b
 
-        delivery_reward = deliveries * 10.0
-        pickup_reward = pickups * 3.0
+        # Action-dependent rewards (strong signal — directly caused by agent)
+        delivery_reward = deliveries * 30.0
+        pickup_reward = pickups * 10.0
 
         num_waiting = 0
         total_wait_seconds = 0.0
@@ -441,13 +515,14 @@ class BuildingEnvironment:
             avg_w = total_wait_seconds / num_waiting
             wait_penalty = -0.1 * math.log1p(avg_w / 10.0)
 
-        critical_penalty = -5.0 * num_critical
+        # Log-scaled: 400 critical -> -30 instead of -2000
+        critical_penalty = -5.0 * math.log1p(num_critical)
 
         crowding_penalty = 0.0
         for f in range(NUM_FLOORS):
             c = bank.get_waiting_count(f)
             if c > PEAK_FLOOR_WAIT_BOUND:
-                crowding_penalty -= 2.0 * (c - PEAK_FLOOR_WAIT_BOUND)
+                crowding_penalty -= 1.0 * math.log1p(c - PEAK_FLOOR_WAIT_BOUND)
 
         rolling_avg = bank.get_rolling_avg_wait()
         sla_penalty = 0.0

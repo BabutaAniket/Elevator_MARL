@@ -129,11 +129,20 @@ class PPOAgent:
         self.rewards = []
         self.values = []
         self.dones = []
+        self.reward_normalizer = RunningRewardNormalizer()
 
     def select_action(self, state, bank=None):
-        raw_actions, log_probs, value = self.model.get_actions(state)
+        with torch.no_grad():
+            s = torch.FloatTensor(state).unsqueeze(0)
+            logits_list, value = self.model(s)
+
+        raw_actions = []
+        for logits in logits_list:
+            dist = Categorical(logits=logits.squeeze(0))
+            action = dist.sample()
+            raw_actions.append(action.item())
+
         if bank:
-            accessible = bank.accessible_floors
             actions = []
             for i, lift in enumerate(bank.lifts):
                 if lift.state in (LiftState.DOOR_OPEN, LiftState.DECELERATING):
@@ -150,10 +159,17 @@ class PPOAgent:
                     actions.append(raw_actions[i])
         else:
             actions = raw_actions
+
+        # Compute log_probs for the EXECUTED actions (not raw NN outputs)
+        log_probs = []
+        for i, logits in enumerate(logits_list):
+            dist = Categorical(logits=logits.squeeze(0))
+            log_probs.append(dist.log_prob(torch.tensor(actions[i])).item())
+
         self.states.append(state)
-        self.actions.append(raw_actions)
+        self.actions.append(actions)
         self.log_probs.append(log_probs)
-        self.values.append(value)
+        self.values.append(value.item())
         return actions
 
     def store_reward(self, reward, done=False):
@@ -161,13 +177,14 @@ class PPOAgent:
         self.dones.append(done)
 
     def update(self):
-        if len(self.states) < BATCH_SIZE:
+        if len(self.states) < 32:
             return 0.0
 
         states = torch.FloatTensor(np.array(self.states))
         actions = torch.LongTensor(np.array(self.actions))
         old_log_probs = torch.FloatTensor(np.array(self.log_probs)).sum(dim=-1)
-        rewards = np.clip(np.array(self.rewards), -10.0, 10.0)
+        raw_rewards = np.array(self.rewards)
+        rewards = np.array([self.reward_normalizer.normalize(r) for r in raw_rewards])
         values = np.array(self.values)
         dones = np.array(self.dones, dtype=np.float32)
 
@@ -372,6 +389,14 @@ class AStarDispatchController:
     def get_actions(self, bank, tick):
         actions = [int(LiftAction.IDLE)] * NUM_LIFTS_PER_BANK
         accessible = bank.accessible_floors
+        floor_assigned: dict = {}  # floor -> lifts already committed this tick
+
+        # Pre-register floors that are actively being served by lifts currently
+        # opening doors or decelerating.  Without this, those floors look
+        # completely "unassigned" and every other lift dogpiles onto them.
+        for lift in bank.lifts:
+            if lift.state in (LiftState.DOOR_OPEN, LiftState.DECELERATING):
+                floor_assigned[lift.floor] = floor_assigned.get(lift.floor, 0) + 1
 
         for i, lift in enumerate(bank.lifts):
             if lift.state in (LiftState.DOOR_OPEN, LiftState.DECELERATING):
@@ -392,6 +417,8 @@ class AStarDispatchController:
                               key=lambda d: abs(d - lift.floor))
                 actions[i] = (int(LiftAction.MOVE_UP) if nearest > lift.floor
                               else int(LiftAction.MOVE_DOWN))
+                # Also register the destination so other lifts don't pile on
+                floor_assigned[nearest] = floor_assigned.get(nearest, 0) + 1
                 continue
 
             best_floor = -1
@@ -405,13 +432,17 @@ class AStarDispatchController:
                     continue
                 max_wait = max(tick - p.arrival_time for p in waiting)
                 travel = abs(f - lift.floor)
-                urgency = min(max_wait, 120) * 0.3
-                cost = travel - urgency
+                urgency = max_wait * 0.3  # no cap: extreme waits dominate proximity
+                # Penalise floors already targeted by earlier lifts this tick
+                # so lifts spread out rather than all converging on one floor
+                oversubscription = floor_assigned.get(f, 0) * (urgency * 0.5 + 1)
+                cost = travel - urgency + oversubscription
                 if cost < best_cost:
                     best_cost = cost
                     best_floor = f
 
             if best_floor >= 0:
+                floor_assigned[best_floor] = floor_assigned.get(best_floor, 0) + 1
                 if best_floor > lift.floor:
                     actions[i] = int(LiftAction.MOVE_UP)
                 elif best_floor < lift.floor:
@@ -437,13 +468,25 @@ class AStarScanController:
                 actions[i] = int(LiftAction.STOP_OPEN)
                 continue
 
-            pickable = [p for p in bank.hall_calls[lift.floor]
-                        if p.destination in accessible]
-            if pickable and not lift.is_full:
+            d = self._dir.get(i, 0)
+
+            # FIX 1: Direction-Aware Pickup Check to prevent infinite door-stuttering loops
+            has_matching_pickup = False
+            if lift.floor in accessible and not lift.is_full:
+                for p in bank.hall_calls[lift.floor]:
+                    if p.destination in accessible:
+                        # If empty or idle, any pickup is valid
+                        if lift.load == 0 or d == 0:
+                            has_matching_pickup = True
+                            break
+                        # If moving, only stop for passengers traveling in our direction
+                        elif (d > 0 and p.destination > lift.floor) or (d < 0 and p.destination < lift.floor):
+                            has_matching_pickup = True
+                            break
+
+            if has_matching_pickup:
                 actions[i] = int(LiftAction.STOP_OPEN)
                 continue
-
-            d = self._dir.get(i, 0)
 
             if lift.destinations:
                 nearest = min(lift.destinations, key=lambda f: abs(f - lift.floor))
@@ -490,18 +533,22 @@ class AStarScanController:
         for f in range(NUM_FLOORS):
             if f not in accessible:
                 continue
-            waiting = [p for p in bank.hall_calls[f]
-                       if p.destination in accessible]
+            waiting = [p for p in bank.hall_calls[f] if p.destination in accessible]
             if not waiting:
                 continue
+
             max_wait = max(tick - p.arrival_time for p in waiting)
-            urgency = len(waiting) + max_wait / 30.0
+
+            # FIX 2: Linear cost scoring prevents mathematical distortion over long runs
+            urgency = (max_wait / 10.0) + (len(waiting) * 2.0)
             dist = max(abs(f - lift.floor), 1)
-            score = urgency / dist
+            score = urgency - (dist * 1.5)
+
             if f > lift.floor:
-                up_score += score
+                up_score += max(score, 0)
             else:
-                dn_score += score
+                dn_score += max(score, 0)
+
         if up_score == 0 and dn_score == 0:
             return 0
         return 1 if up_score > dn_score else -1
@@ -509,6 +556,7 @@ class AStarScanController:
 
 
 class DQNetwork(nn.Module):
+    """Dueling DQN: splits Q(s,a) into V(s) + A(s,a) - mean(A)."""
 
     LIFT_FEAT_DIM = 8
 
@@ -525,7 +573,16 @@ class DQNetwork(nn.Module):
         )
 
         per_lift_input = 128 + self.LIFT_FEAT_DIM
-        self.q_heads = nn.ModuleList([
+
+        # Dueling streams: separate value and advantage heads per lift
+        self.value_heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(per_lift_input, 64),
+                nn.ReLU(),
+                nn.Linear(64, 1),
+            ) for _ in range(num_lifts)
+        ])
+        self.advantage_heads = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(per_lift_input, 64),
                 nn.ReLU(),
@@ -536,14 +593,35 @@ class DQNetwork(nn.Module):
     def forward(self, state, lift_features=None):
         global_feat = self.global_encoder(state)
         results = []
-        for i, head in enumerate(self.q_heads):
+        for i in range(self.num_lifts):
             if lift_features is not None:
                 lf = lift_features[:, i, :]
             else:
                 lf = torch.zeros(state.shape[0], self.LIFT_FEAT_DIM)
             combined = torch.cat([global_feat, lf], dim=-1)
-            results.append(head(combined))
+            v = self.value_heads[i](combined)          # (batch, 1)
+            a = self.advantage_heads[i](combined)      # (batch, action_dim)
+            q = v + a - a.mean(dim=-1, keepdim=True)   # Dueling aggregation
+            results.append(q)
         return results
+
+
+class RunningRewardNormalizer:
+    """Tracks running mean/var of rewards for adaptive scaling."""
+    def __init__(self, clip=10.0):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = 1e-4
+        self.clip = clip
+
+    def normalize(self, reward):
+        self.count += 1
+        delta = reward - self.mean
+        self.mean += delta / self.count
+        delta2 = reward - self.mean
+        self.var += (delta * delta2 - self.var) / self.count
+        std = max(self.var ** 0.5, 1e-6)
+        return max(-self.clip, min(self.clip, (reward - self.mean) / std))
 
 
 def _extract_lift_features(bank, tick):
@@ -575,12 +653,13 @@ class DQNAgent:
         self.replay_buffer = deque(maxlen=100000)
         self.epsilon = 1.0
         self.epsilon_min = 0.05
-        self.epsilon_decay = 0.9997
-        self.target_update_freq = 500
+        self.epsilon_decay = 0.998
+        self.target_update_freq = 250
         self.step_count = 0
         self.last_state = None
         self.last_actions = None
         self.last_lift_feats = None
+        self.reward_normalizer = RunningRewardNormalizer()
 
     def select_action(self, state, bank=None):
         self.last_state = state
@@ -615,46 +694,70 @@ class DQNAgent:
                     else:
                         actions.append(int(LiftAction.MOVE_DOWN))
                 else:
-                    actions.append(raw_actions[i])
+                    # Empty lift with no in-progress destination:
+                    # Check if there are pickable passengers at the current floor
+                    pickable = not lift.is_full and any(
+                        p.destination in accessible
+                        for p in bank.hall_calls.get(lift.floor, []))
+                    if pickable:
+                        actions.append(int(LiftAction.STOP_OPEN))
+                    else:
+                        act = raw_actions[i]
+                        # Block stuck-at-empty-floor cycle:
+                        # Q-value collapse makes DQN always pick STOP_OPEN, which
+                        # opens empty doors forever and also blocks urgency dispatch
+                        # (urgency dispatch only overrides IDLE, not STOP_OPEN)
+                        if act == int(LiftAction.STOP_OPEN) and not lift.passengers:
+                            act = int(LiftAction.IDLE)
+                        actions.append(act)
         else:
             actions = raw_actions
 
-        self.last_actions = raw_actions
+        self.last_actions = actions
         return actions
 
-    def store_reward(self, reward, next_state=None, done=False):
-        if self.last_state is not None and next_state is not None:
+    def store_reward(self, per_lift_rewards, next_state=None, bank=None, done=False):
+        if self.last_state is not None and next_state is not None and bank is not None:
+            # Extract the new lift features from the next state
+            next_lift_feats = _extract_lift_features(bank, 0)
+            # per_lift_rewards: list of 8 individual lift rewards (fixes multi-agent credit assignment)
             self.replay_buffer.append(
                 (self.last_state, self.last_lift_feats, self.last_actions,
-                 reward, next_state, done))
+                 per_lift_rewards, next_state, next_lift_feats, done))
 
     def update(self):
-        if len(self.replay_buffer) < BATCH_SIZE * 4:
+        if len(self.replay_buffer) < BATCH_SIZE * 2:
             return 0.0
 
         batch = random.sample(list(self.replay_buffer), BATCH_SIZE)
         states = torch.FloatTensor(np.array([b[0] for b in batch]))
         lift_feats = torch.FloatTensor(np.array([b[1] for b in batch]))
         actions = [b[2] for b in batch]
-        rewards = torch.FloatTensor([b[3] for b in batch])
+        # per_lift_rewards_batch: (BATCH_SIZE, NUM_LIFTS_PER_BANK)
+        per_lift_rewards_batch = np.array([b[3] for b in batch], dtype=np.float32)
         next_states = torch.FloatTensor(np.array([b[4] for b in batch]))
-        dones = torch.FloatTensor([b[5] for b in batch])
-
-        rewards = torch.clamp(rewards, -50.0, 50.0)
+        next_lift_feats = torch.FloatTensor(np.array([b[5] for b in batch]))
+        dones = torch.FloatTensor([b[6] for b in batch])
 
         q_values = self.q_net(states, lift_feats)
 
         with torch.no_grad():
-            next_q_online = self.q_net(next_states, lift_feats)
-            next_q_target = self.target_net(next_states, lift_feats)
+            # Use next_lift_feats to ensure network sees the correct next state features
+            next_q_online = self.q_net(next_states, next_lift_feats)
+            next_q_target = self.target_net(next_states, next_lift_feats)
 
         total_loss = torch.tensor(0.0)
         for lift_i in range(NUM_LIFTS_PER_BANK):
+            # Use THIS lift's individual reward — fixes multi-agent credit assignment
+            raw_rewards_i = per_lift_rewards_batch[:, lift_i]
+            rewards_i = torch.FloatTensor(
+                [self.reward_normalizer.normalize(float(r)) for r in raw_rewards_i])
+
             a = torch.LongTensor([act[lift_i] for act in actions])
             current_q = q_values[lift_i].gather(1, a.unsqueeze(1)).squeeze(1)
             best_next_a = next_q_online[lift_i].argmax(dim=-1)
             max_next_q = next_q_target[lift_i].gather(1, best_next_a.unsqueeze(1)).squeeze(1)
-            target_q = rewards + GAMMA * max_next_q * (1 - dones)
+            target_q = rewards_i + GAMMA * max_next_q * (1 - dones)
             total_loss = total_loss + nn.functional.smooth_l1_loss(current_q, target_q.detach())
 
         self.optimizer.zero_grad()
@@ -1115,10 +1218,20 @@ class AStarScanPPOController:
         self.rewards = []
         self.values = []
         self.dones = []
+        self.reward_normalizer = RunningRewardNormalizer()
 
     def select_action(self, state, bank, tick):
         base_actions = self.base.get_actions(bank, tick)
-        raw_actions, log_probs, value = self.model.get_actions(state)
+
+        with torch.no_grad():
+            s = torch.FloatTensor(state).unsqueeze(0)
+            logits_list, value = self.model(s)
+
+        raw_actions = []
+        for logits in logits_list:
+            dist = Categorical(logits=logits.squeeze(0))
+            action = dist.sample()
+            raw_actions.append(action.item())
 
         final = list(base_actions)
         for i, lift in enumerate(bank.lifts):
@@ -1129,10 +1242,16 @@ class AStarScanPPOController:
                 if pa in (int(LiftAction.MOVE_UP), int(LiftAction.MOVE_DOWN)):
                     final[i] = pa
 
+        # Compute log_probs for the EXECUTED actions (not raw NN outputs)
+        log_probs = []
+        for i, logits in enumerate(logits_list):
+            dist = Categorical(logits=logits.squeeze(0))
+            log_probs.append(dist.log_prob(torch.tensor(final[i])).item())
+
         self.states.append(state)
-        self.actions.append(raw_actions)
+        self.actions.append(final)
         self.log_probs.append(log_probs)
-        self.values.append(value)
+        self.values.append(value.item())
         return final
 
     def store_reward(self, reward, done=False):
@@ -1140,13 +1259,14 @@ class AStarScanPPOController:
         self.dones.append(done)
 
     def update(self):
-        if len(self.states) < BATCH_SIZE:
+        if len(self.states) < 32:
             return 0.0
 
         states = torch.FloatTensor(np.array(self.states))
         actions = torch.LongTensor(np.array(self.actions))
         old_log_probs = torch.FloatTensor(np.array(self.log_probs)).sum(dim=-1)
-        rewards = np.clip(np.array(self.rewards), -10.0, 10.0)
+        raw_rewards = np.array(self.rewards)
+        rewards = np.array([self.reward_normalizer.normalize(r) for r in raw_rewards])
         values = np.array(self.values)
         dones = np.array(self.dones, dtype=np.float32)
 
@@ -1289,7 +1409,7 @@ class QRDQNAgent:
         else:
             actions = raw_actions
 
-        self.last_actions = raw_actions
+        self.last_actions = actions
         return actions
 
     def store_reward(self, reward, next_state=None, done=False):

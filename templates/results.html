@@ -33,9 +33,10 @@
         .warn { color: #a06000; font-weight: bold; }
         .bad  { color: #b00020; font-weight: bold; }
 
-        .chart-wrap { margin-bottom: 18px; }
-        .chart-wrap canvas { width: 100%; border: 1px solid #eee; display: block; background: #fff; }
-        .chart-label { font-size: 13px; color: #666; margin-bottom: 4px; }
+        .chart-wrap { margin-bottom: 28px; }
+        .chart-wrap canvas { width: 100%; height: 320px; display: block; border-radius: 4px; border: 1px solid #ddd; background: #f8f8f8; }
+        .chart-label { font-size: 13px; color: #555; margin-bottom: 6px; font-weight: bold; }
+        .chart-loading { text-align: center; padding: 20px; color: #aaa; font-size: 13px; display: none; }
 
         .btn-row { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
         .btn { padding: 8px 18px; border: 1px solid #333; background: #333; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; text-decoration: none; display: inline-block; }
@@ -164,20 +165,26 @@
 
     <h2>Wait Time Over Simulation</h2>
     <div class="chart-wrap">
-        <div class="chart-label">Average passenger wait time (seconds) — sampled every 10 ticks</div>
-        <canvas id="waitChart" width="900" height="180"></canvas>
-    </div>
-
-    <h2>Energy Per Tick</h2>
-    <div class="chart-wrap">
-        <div class="chart-label">Energy consumed each tick (arbitrary units) — moving lifts + door operations</div>
-        <canvas id="energyChart" width="900" height="180"></canvas>
+        <div class="chart-label">&#9201; Average &amp; Max passenger wait time (seconds)</div>
+        <canvas id="waitChart" width="900" height="320"></canvas>
     </div>
 
     <h2>Throughput Per Minute</h2>
     <div class="chart-wrap">
-        <div class="chart-label">Passengers delivered in the rolling last-60-tick window</div>
-        <canvas id="throughputChart" width="900" height="180"></canvas>
+        <div class="chart-label">&#128100; Passengers delivered per rolling 60-tick window</div>
+        <canvas id="throughputChart" width="900" height="320"></canvas>
+    </div>
+
+    <h2>Concurrent Passengers Waiting</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">&#128197; Total passengers waiting at call buttons each sample tick</div>
+        <canvas id="waitingChart" width="900" height="320"></canvas>
+    </div>
+
+    <h2>Energy Per Tick</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">&#9889; Energy consumed per tick (moving lifts + door operations)</div>
+        <canvas id="energyChart" width="900" height="320"></canvas>
     </div>
 
     <div class="footer">
@@ -189,92 +196,204 @@
 <script>
 const RUN_ID = {{ run_id }};
 
-function drawChart(canvasId, xs, ys, label, color) {
+// Parse any CSS colour string to an [r,g,b] array so gradient stops can use rgba().
+function colorToRgb(c) {
+    c = c.trim();
+    // Expand 3-digit hex: #rgb → #rrggbb
+    if (/^#[0-9a-fA-F]{3}$/.test(c))
+        c = '#' + c[1]+c[1]+c[2]+c[2]+c[3]+c[3];
+    if (/^#[0-9a-fA-F]{6}$/.test(c)) {
+        const n = parseInt(c.slice(1), 16);
+        return [(n>>16)&255, (n>>8)&255, n&255];
+    }
+    return [100, 100, 100]; // fallback grey
+}
+
+function drawChart(canvasId, xs, ys, label, color, ys2, label2, color2) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
+    // Use the fixed HTML width/height attributes as drawing space — always reliable.
+    const W = canvas.width;   // 900
+    const H = canvas.height;  // 320
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
+
+    // Draw background first — visible even if everything else fails
     ctx.clearRect(0, 0, W, H);
-    if (!ys.length || ys.length < 2) {
-        ctx.fillStyle = '#bbb'; ctx.font = '13px Verdana, sans-serif';
-        ctx.fillText('No data recorded', 10, H / 2); return;
+    ctx.fillStyle = '#f8f9fb';
+    ctx.fillRect(0, 0, W, H);
+
+    if (!ys || ys.length < 2) {
+        ctx.fillStyle = '#888';
+        ctx.font = 'bold 14px Verdana, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data recorded for this run', W / 2, H / 2 - 10);
+        ctx.fillStyle = '#bbb';
+        ctx.font = '12px Verdana, sans-serif';
+        ctx.fillText('(run the simulation first, then view the report)', W / 2, H / 2 + 12);
+        ctx.textAlign = 'left';
+        return;
     }
-    const maxY = Math.max(1, ...ys) * 1.1;
-    const minX = xs[0], maxX = xs[xs.length - 1];
+
+    const [r1, g1, b1] = colorToRgb(color);
+    const [r2, g2, b2] = color2 ? colorToRgb(color2) : [150, 150, 150];
+
+    const allYs  = ys2 ? ys.concat(ys2) : ys;
+    const maxY   = Math.max(1, ...allYs) * 1.15;
+    const minX   = xs[0], maxX = xs[xs.length - 1];
     const rangeX = Math.max(maxX - minX, 1);
-    const PAD_L = 50, PAD_R = 10, PAD_T = 22, PAD_B = 5;
+    const PAD_L = 60, PAD_R = 20, PAD_T = 30, PAD_B = 38;
+    const plotW  = W - PAD_L - PAD_R;
+    const plotH  = H - PAD_T - PAD_B;
 
-    // Grid
-    ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - i / 4);
+    const toX = v => PAD_L + ((v - minX) / rangeX) * plotW;
+    const toY = v => PAD_T + plotH * (1 - v / maxY);
+
+    // Horizontal grid lines + Y-axis labels
+    const GRID = 5;
+    ctx.font = '11px Verdana, sans-serif';
+    for (let i = 0; i <= GRID; i++) {
+        const v = maxY * i / GRID;
+        const y = toY(v);
+        ctx.strokeStyle = i === 0 ? '#aaa' : '#e0e0e0';
+        ctx.lineWidth   = i === 0 ? 1.5   : 1;
         ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
-        ctx.fillStyle = '#999'; ctx.font = '11px Verdana, sans-serif';
-        ctx.fillText((maxY * i / 4).toFixed(1), 2, y + 4);
+        ctx.fillStyle   = '#666';
+        ctx.textAlign   = 'right';
+        const lbl = v >= 10000 ? (v/1000).toFixed(0)+'k'
+                  : v >= 1000  ? (v/1000).toFixed(1)+'k'
+                  : v >= 10    ? v.toFixed(0)
+                  : v.toFixed(1);
+        ctx.fillText(lbl, PAD_L - 6, y + 4);
     }
 
-    // Fill area
-    ctx.beginPath();
-    for (let i = 0; i < ys.length; i++) {
-        const x = PAD_L + ((xs[i] - minX) / rangeX) * (W - PAD_L - PAD_R);
-        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - ys[i] / maxY);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    // X-axis tick marks + labels  (show ≤8 evenly spaced)
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#888';
+    const xStep = Math.max(1, Math.floor(xs.length / 8));
+    for (let i = 0; i < xs.length; i += xStep) {
+        const x = toX(xs[i]);
+        ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, PAD_T); ctx.lineTo(x, H - PAD_B + 4); ctx.stroke();
+        ctx.fillText('t' + xs[i], x, H - PAD_B + 16);
     }
-    const lastX = PAD_L + ((xs[xs.length-1] - minX) / rangeX) * (W - PAD_L - PAD_R);
-    const firstX = PAD_L;
-    ctx.lineTo(lastX, H - PAD_B); ctx.lineTo(firstX, H - PAD_B); ctx.closePath();
-    ctx.fillStyle = color + '22';
-    ctx.fill();
 
-    // Line
-    ctx.strokeStyle = color; ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let i = 0; i < ys.length; i++) {
-        const x = PAD_L + ((xs[i] - minX) / rangeX) * (W - PAD_L - PAD_R);
-        const y = PAD_T + (H - PAD_T - PAD_B) * (1 - ys[i] / maxY);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    // Helper: draw filled-area + line for one data series
+    function drawSeries(seriesYs, rgb, dashed) {
+        const [r, g, b] = rgb;
+        const lineCol = 'rgb(' + r + ',' + g + ',' + b + ')';
+        // Gradient fill under the line
+        const grad = ctx.createLinearGradient(0, PAD_T, 0, H - PAD_B);
+        grad.addColorStop(0, 'rgba(' + r + ',' + g + ',' + b + ',0.30)');
+        grad.addColorStop(1, 'rgba(' + r + ',' + g + ',' + b + ',0.03)');
+        ctx.beginPath();
+        ctx.moveTo(toX(xs[0]), toY(seriesYs[0]));
+        for (let i = 1; i < seriesYs.length; i++)
+            ctx.lineTo(toX(xs[i]), toY(seriesYs[i]));
+        ctx.lineTo(toX(xs[xs.length - 1]), H - PAD_B);
+        ctx.lineTo(toX(xs[0]),             H - PAD_B);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+        // Line
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth   = 2.5;
+        ctx.lineJoin    = 'round';
+        ctx.setLineDash(dashed ? [7, 4] : []);
+        ctx.beginPath();
+        ctx.moveTo(toX(xs[0]), toY(seriesYs[0]));
+        for (let i = 1; i < seriesYs.length; i++)
+            ctx.lineTo(toX(xs[i]), toY(seriesYs[i]));
+        ctx.stroke();
+        ctx.setLineDash([]);
     }
-    ctx.stroke();
 
-    // Label
-    ctx.fillStyle = color; ctx.font = 'bold 12px Verdana, sans-serif';
-    ctx.fillText(label + '  (final: ' + ys[ys.length-1].toFixed(1) + '  peak: ' + Math.max(...ys).toFixed(1) + ')', PAD_L + 4, 15);
+    drawSeries(ys, [r1, g1, b1], false);
+    if (ys2 && ys2.length >= 2) drawSeries(ys2, [r2, g2, b2], true);
+
+    // Legend (top-left, inside plot area)
+    ctx.font      = 'bold 12px Verdana, sans-serif';
+    ctx.textAlign = 'left';
+    let lx = PAD_L + 6;
+    // Series 1
+    ctx.fillStyle = 'rgb(' + r1 + ',' + g1 + ',' + b1 + ')';
+    const t1 = label + '  peak: ' + Math.max(...ys).toFixed(1) + '  final: ' + ys[ys.length-1].toFixed(1);
+    ctx.fillText(t1, lx, PAD_T - 8);
+    // Series 2
+    if (ys2 && label2) {
+        lx += ctx.measureText(t1).width + 20;
+        ctx.fillStyle = 'rgb(' + r2 + ',' + g2 + ',' + b2 + ')';
+        ctx.fillText(label2 + '  peak: ' + Math.max(...ys2).toFixed(1) + '  final: ' + ys2[ys2.length-1].toFixed(1), lx, PAD_T - 8);
+    }
 }
 
 async function loadCharts() {
+    let stats;
     try {
-        const res = await fetch('/api/runs/' + RUN_ID + '/stats?sample=5');
-        const stats = await res.json();
-        if (!stats || !stats.length) return;
-        const ticks = stats.map(s => s.tick);
-        drawChart('waitChart',       ticks, stats.map(s => s.avg_wait || 0),          'Avg Wait (s)',   '#c44');
-        drawChart('energyChart',     ticks, stats.map(s => s.tick_energy || 0),        'Energy / tick',  '#448');
-        drawChart('throughputChart', ticks, stats.map(s => s.throughput_per_min || 0), 'Throughput/min', '#4a4');
-    } catch(e) { console.error(e); }
+        const res = await fetch('/api/runs/' + RUN_ID + '/stats?sample=1');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        stats = await res.json();
+    } catch(e) {
+        console.error('Chart load failed:', e);
+        ['waitChart','throughputChart','waitingChart','energyChart'].forEach(id => {
+            const c = document.getElementById(id);
+            if (!c) return;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#f8f9fb'; ctx.fillRect(0, 0, c.width, c.height);
+            ctx.fillStyle = '#c00'; ctx.font = '13px Verdana';
+            ctx.textAlign = 'center';
+            ctx.fillText('Error loading chart data: ' + e.message, c.width/2, c.height/2);
+        });
+        return;
+    }
+
+    if (!stats || stats.length < 2) {
+        ['waitChart','throughputChart','waitingChart','energyChart'].forEach(id =>
+            drawChart(id, [0, 1], null, '', '#999')
+        );
+        return;
+    }
+
+    const ticks = stats.map(s => s.tick);
+    drawChart('waitChart',       ticks,
+              stats.map(s => s.avg_wait            || 0), 'Avg Wait (s)',        '#cc4444',
+              stats.map(s => s.max_wait            || 0), 'Max Wait (s)',        '#ee8822');
+    drawChart('throughputChart', ticks,
+              stats.map(s => s.throughput_per_min  || 0), 'Throughput / min',    '#2a8a2a');
+    drawChart('waitingChart',    ticks,
+              stats.map(s => s.total_waiting       || 0), 'Waiting Passengers',  '#8844cc');
+    drawChart('energyChart',     ticks,
+              stats.map(s => s.tick_energy         || 0), 'Energy / tick',       '#2255aa');
 }
 
 function printReport() {
-    // Convert canvases to images so they survive printing
+    // Snapshot canvases as images so they survive the print layout reflow
     const conversions = [];
     document.querySelectorAll('canvas').forEach(canvas => {
         const img = document.createElement('img');
         img.src = canvas.toDataURL('image/png');
-        img.style.cssText = canvas.style.cssText;
-        img.style.width = '100%';
+        img.style.width  = '100%';
+        img.style.height = 'auto';
+        img.style.border = '1px solid #ddd';
+        img.style.borderRadius = '4px';
+        img.style.display = 'block';
         img.className = '_print_img';
         canvas.parentNode.insertBefore(img, canvas);
         canvas.style.display = 'none';
         conversions.push({ canvas, img });
     });
     window.print();
-    // Restore after print dialog closes
     conversions.forEach(({ canvas, img }) => {
         canvas.style.display = '';
         img.remove();
     });
 }
 
-loadCharts();
+// Defer until layout is fully computed so offsetWidth is non-zero
+if (document.readyState === 'complete') {
+    loadCharts();
+} else {
+    window.addEventListener('load', loadCharts);
+}
 </script>
 </body>
 </html>

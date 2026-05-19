@@ -1,5 +1,7 @@
 import threading
 import time
+import logging
+import os
 from typing import Optional, List
 
 from environment import BuildingEnvironment
@@ -18,6 +20,22 @@ RL_ALGORITHMS = {'ppo', 'dqn', 'reinforce', 'qlearning', 'cmaes',
                  'astar_scan_ppo', 'qrdqn'}
 TRAINABLE_ALGORITHMS = {'ppo', 'dqn', 'reinforce', 'cmaes',
                         'astar_scan_ppo', 'qrdqn'}
+
+# ── Training run logger ────────────────────────────────────────────────────────
+os.makedirs('logs', exist_ok=True)
+_train_logger = logging.getLogger('autotrain')
+if not _train_logger.handlers:
+    _train_logger.setLevel(logging.INFO)
+    _fh = logging.FileHandler('logs/auto_train.log', encoding='utf-8')
+    _fh.setFormatter(logging.Formatter('%(asctime)s  %(message)s',
+                                       datefmt='%Y-%m-%d %H:%M:%S'))
+    _ch = logging.StreamHandler()           # also prints to console
+    _ch.setFormatter(logging.Formatter('%(asctime)s  %(message)s',
+                                       datefmt='%H:%M:%S'))
+    _train_logger.addHandler(_fh)
+    _train_logger.addHandler(_ch)
+    _train_logger.propagate = False
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 class SimulationRunner:
@@ -66,6 +84,11 @@ class SimulationRunner:
         self.cumulative_reward_a = 0
         self.cumulative_reward_b = 0
 
+        # Per-run peak/aggregate stats (reset each episode)
+        self._peak_concurrent_waiting = 0
+        self._peak_max_wait = 0.0
+        self._avg_wait_samples: List[float] = []
+
         self._last_actions_a: List[int] = [3] * 8
         self._last_actions_b: List[int] = [3] * 8
         self._action_repeat = 4
@@ -90,6 +113,9 @@ class SimulationRunner:
         self.sim_start_time = int(start_hour * 3600)
         self.cumulative_reward_a = 0
         self.cumulative_reward_b = 0
+        self._peak_concurrent_waiting = 0
+        self._peak_max_wait = 0.0
+        self._avg_wait_samples = []
 
         if speed < 100:
             self.save_interval = 10
@@ -150,6 +176,13 @@ class SimulationRunner:
         elif algorithm == 'idlewait':
             self.idlewait_a = IdleWaitController('A')
             self.idlewait_b = IdleWaitController('B')
+
+        # Pure baseline algorithms have complete self-contained scheduling logic.
+        # Disabling urgency dispatch prevents the safety filter from overriding
+        # their lift assignments mid-sweep, which would otherwise produce
+        # misleading (artificially poor) benchmark results.
+        if algorithm in ('scan', 'nearest', 'roundrobin', 'idlewait'):
+            self.env.urgency_dispatch_enabled = False
         elif algorithm == 'astar_scan_ppo':
             if not (_reuse_agents and self.asp_a):
                 self.asp_a = AStarScanPPOController('A')
@@ -194,7 +227,14 @@ class SimulationRunner:
             self._last_actions_a = actions_a
             self._last_actions_b = actions_b
 
-            reward_a, reward_b = self.env.step(actions_a, actions_b)
+            reward_a, reward_b, safe_a, safe_b = self.env.step(actions_a, actions_b)
+            # Update DQN stored actions to match the safety-filtered executed actions
+            if self.algorithm == 'dqn':
+                self.dqn_a.last_actions = safe_a
+                self.dqn_b.last_actions = safe_b
+            elif self.algorithm == 'qrdqn':
+                self.qrdqn_a.last_actions = safe_a
+                self.qrdqn_b.last_actions = safe_b
             self.cumulative_reward_a += reward_a
             self.cumulative_reward_b += reward_b
 
@@ -214,6 +254,17 @@ class SimulationRunner:
                 'bank_b_lifts':      prev.get('bank_b_lifts', []),
                 'floor_waiting':     prev.get('floor_waiting', {}),
             }
+
+            # Track per-run peak/aggregate stats for end-of-episode log
+            tw = self.latest_info['total_waiting']
+            mw = self.latest_info['max_wait']
+            aw = self.latest_info['avg_wait']
+            if tw > self._peak_concurrent_waiting:
+                self._peak_concurrent_waiting = tw
+            if mw > self._peak_max_wait:
+                self._peak_max_wait = mw
+            if aw > 0:
+                self._avg_wait_samples.append(aw)
 
             self._train_step(reward_a, reward_b)
 
@@ -247,16 +298,21 @@ class SimulationRunner:
                 self._log_training(tick // 256, loss_a + loss_b)
 
         elif algo == 'dqn':
-            self.dqn_a._pending_reward = getattr(self.dqn_a, '_pending_reward', 0) + reward_a
-            self.dqn_b._pending_reward = getattr(self.dqn_b, '_pending_reward', 0) + reward_b
+            # Accumulate per-lift rewards (fixes multi-agent credit assignment)
+            cur_a = self.env.get_per_lift_rewards(self.env.bank_a)
+            cur_b = self.env.get_per_lift_rewards(self.env.bank_b)
+            pending_a = getattr(self.dqn_a, '_pending_lift_rewards', [0.0] * 8)
+            pending_b = getattr(self.dqn_b, '_pending_lift_rewards', [0.0] * 8)
+            self.dqn_a._pending_lift_rewards = [p + c for p, c in zip(pending_a, cur_a)]
+            self.dqn_b._pending_lift_rewards = [p + c for p, c in zip(pending_b, cur_b)]
             if is_decision_tick:
                 ns_a = self.env.get_state('A')
                 ns_b = self.env.get_state('B')
-                self.dqn_a.store_reward(self.dqn_a._pending_reward, ns_a)
-                self.dqn_b.store_reward(self.dqn_b._pending_reward, ns_b)
-                self.dqn_a._pending_reward = 0.0
-                self.dqn_b._pending_reward = 0.0
-            if self.train_ppo and tick % 16 == 0 and tick > 0:
+                self.dqn_a.store_reward(self.dqn_a._pending_lift_rewards, ns_a, bank=self.env.bank_a)
+                self.dqn_b.store_reward(self.dqn_b._pending_lift_rewards, ns_b, bank=self.env.bank_b)
+                self.dqn_a._pending_lift_rewards = [0.0] * 8
+                self.dqn_b._pending_lift_rewards = [0.0] * 8
+            if self.train_ppo and tick % 64 == 0 and tick > 0:
                 loss_a = self.dqn_a.update()
                 loss_b = self.dqn_b.update()
                 if tick % 256 == 0:
@@ -308,7 +364,7 @@ class SimulationRunner:
                 self.qrdqn_b.store_reward(self.qrdqn_b._pending_reward, ns_b)
                 self.qrdqn_a._pending_reward = 0.0
                 self.qrdqn_b._pending_reward = 0.0
-            if self.train_ppo and tick % 16 == 0 and tick > 0:
+            if self.train_ppo and tick % 64 == 0 and tick > 0:
                 loss_a = self.qrdqn_a.update()
                 loss_b = self.qrdqn_b.update()
                 if tick % 256 == 0:
@@ -473,13 +529,57 @@ class SimulationRunner:
             'sim_running': self.running,
         }
 
+    def _log_run_summary(self, run_name):
+        """Write a one-line per-episode summary to logs/auto_train.log and stdout."""
+        delivered   = self.latest_info.get('total_delivered', 0)
+        energy      = self.latest_info.get('total_energy', 0)
+        mean_aw     = (sum(self._avg_wait_samples) / len(self._avg_wait_samples)
+                       if self._avg_wait_samples else 0.0)
+        peak_mw     = self._peak_max_wait
+        peak_cw     = self._peak_concurrent_waiting
+        rew_a       = round(self.cumulative_reward_a, 1)
+        rew_b       = round(self.cumulative_reward_b, 1)
+        algo        = self.algorithm.upper()
+
+        # Assessment flags
+        aw_flag  = 'GOOD' if mean_aw  < 30   else ('OK' if mean_aw  < 60   else 'POOR')
+        mw_flag  = 'GOOD' if peak_mw  < 60   else ('OK' if peak_mw  < 120  else 'POOR')
+        cw_flag  = 'GOOD' if peak_cw  < 20   else ('OK' if peak_cw  < 50   else 'POOR')
+
+        _train_logger.info(
+            '[%s] %-30s | Delivered: %4d | '
+            'AvgWait: %6.0fs [%s] | PeakMaxWait: %6.0fs [%s] | '
+            'PeakWaiting: %3d [%s] | Energy: %7.0f | Reward: %.0f/%.0f',
+            algo, run_name,
+            delivered,
+            mean_aw,  aw_flag,
+            peak_mw,  mw_flag,
+            peak_cw,  cw_flag,
+            energy,
+            rew_a, rew_b,
+        )
+
     def _auto_train_loop(self):
         cfg = self.auto_train_config
+        algo = cfg.get('algorithm', 'ppo').upper()
+        base = cfg.get('base_name', 'AutoTrain')
+        _train_logger.info('='*90)
+        _train_logger.info('AUTO-TRAIN START  algo=%s  runs=%d  dur=%dmin  speed=%dx',
+                           algo, self.auto_train_total,
+                           cfg.get('duration', 60), cfg.get('speed', 5000))
+        _train_logger.info('='*90)
+        _train_logger.info(
+            '%-6s  %-30s  %8s  %10s  %14s  %13s  %8s  %14s',
+            'Run', 'Name', 'Delivered',
+            'AvgWait(s)', 'PeakMaxWait(s)', 'PeakWaiting',
+            'Energy', 'Reward A/B')
+        _train_logger.info('-'*110)
+
         for i in range(self.auto_train_total):
             if not self.auto_train_running:
                 break
             self.auto_train_current = i + 1
-            run_name = f"{cfg.get('base_name', 'AutoTrain')} #{self.auto_train_current}"
+            run_name = f"{base} #{self.auto_train_current}"
             self.start(
                 name=run_name,
                 algorithm=cfg.get('algorithm', 'ppo'),
@@ -492,6 +592,13 @@ class SimulationRunner:
             time.sleep(0.2)
             while self.running and self.auto_train_running:
                 time.sleep(0.5)
+
+            # Log end-of-episode summary
+            self._log_run_summary(run_name)
+
+        _train_logger.info('='*90)
+        _train_logger.info('AUTO-TRAIN COMPLETE  algo=%s  total_runs=%d', algo, self.auto_train_current)
+        _train_logger.info('='*90)
         self.auto_train_running = False
 
     def get_live_state(self):

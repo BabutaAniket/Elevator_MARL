@@ -1,7 +1,11 @@
 from flask import Flask, render_template, jsonify, request
+import torch
 from simulation import SimulationRunner
 from database import get_runs, get_run_stats, get_training_logs, get_run_summary, clear_db
 from config import FLOOR_NAMES
+
+# Restrict PyTorch to single thread to avoid GIL contention with Flask/simulation threads
+torch.set_num_threads(1)
 
 app = Flask(__name__)
 runner = SimulationRunner()
