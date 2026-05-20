@@ -138,6 +138,7 @@
                     <option value="cmaes">CMA-ES (Evolutionary Policy Search)</option>
                     <option value="astar_scan_ppo">A*+Scan+PPO (Hybrid RL)</option>
                     <option value="qrdqn">QR-DQN (Quantile Regression DQN)</option>
+                    <option value="meta_cmaes">Meta-Controller (CMA-ES + A* + SCAN)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -318,6 +319,7 @@
                     <option value="cmaes">CMA-ES</option>
                     <option value="astar_scan_ppo">A*+Scan+PPO (Hybrid)</option>
                     <option value="qrdqn">QR-DQN</option>
+                    <option value="meta_cmaes">Meta-Controller (CMA-ES + A* + SCAN)</option>
                 </select>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -670,7 +672,8 @@
             scan: 'SCAN', nearest: 'Nearest First', astar: 'A* Dispatch',
             astar_scan: 'A*+Scan', ppo: 'PPO', dqn: 'DQN', reinforce: 'REINFORCE',
             qlearning: 'Q-Learning', cmaes: 'CMA-ES', roundrobin: 'Round-Robin',
-            idlewait: 'Idle-Wait', astar_scan_ppo: 'A*+Scan+PPO', qrdqn: 'QR-DQN'
+            idlewait: 'Idle-Wait', astar_scan_ppo: 'A*+Scan+PPO', qrdqn: 'QR-DQN',
+            meta_cmaes: 'Meta-Controller'
         };
         document.getElementById('smTitle').textContent =
             'Run Complete \u2014 ' + (algoLabels[data.algorithm] || data.algorithm || 'Simulation');

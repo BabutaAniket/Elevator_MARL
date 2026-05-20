@@ -741,7 +741,7 @@ class DQNAgent:
                             act = int(LiftAction.IDLE)
                         actions.append(act)
         else:
-            actions = raw_actions
+            actions = raw_actions 
 
         self.last_actions = actions
         return actions
@@ -1515,3 +1515,122 @@ class QRDQNAgent:
                 self.target_net.load_state_dict(self.q_net.state_dict())
             except (RuntimeError, KeyError):
                 pass
+
+
+class MetaCMAESController:
+    """Hierarchical Meta-Controller: CMA-ES brain selects between A* and SCAN
+    sub-policies per tick based on the building state.  The neural network
+    outputs a single scalar mode signal — positive triggers SCAN (high
+    throughput), negative triggers A* (energy-efficient, fair)."""
+
+    def __init__(self, bank_id: str, bank=None, pop_size=12):
+        self.bank_id = bank_id
+        self.pop_size = pop_size
+
+        # Sub-policies (SCAN needs a bank object; deferred until first use if not provided)
+        self.astar_subpolicy = AStarDispatchController()
+        self._bank = bank
+        self.scan_subpolicy = ScanController(bank) if bank is not None else None
+
+        # CMA-ES evolves a linear policy:  mode_signal = dot(state, W) + b
+        self.param_dim = STATE_DIM + 1   # weights + bias
+        self.mean = np.zeros(self.param_dim)
+        self.sigma = 0.5
+        self.population = []
+        self.fitnesses = []
+        self.current_params = self.mean.copy()
+        self.eval_idx = 0
+        self.generation = 0
+        self.best_params = self.mean.copy()
+        self.best_fitness = -float('inf')
+        self._generate_population()
+        self._run_reward = 0.0
+
+    def _ensure_scan(self, bank):
+        """Lazily create the SCAN sub-policy once we have a live bank object."""
+        if self.scan_subpolicy is None:
+            self.scan_subpolicy = ScanController(bank)
+            self._bank = bank
+
+    def _generate_population(self):
+        self.population = []
+        self.fitnesses = []
+        for _ in range(self.pop_size):
+            noise = np.random.randn(self.param_dim) * self.sigma
+            self.population.append(self.mean + noise)
+            self.fitnesses.append(0.0)
+        self.eval_idx = 0
+        self.current_params = self.population[0]
+
+    def select_action(self, state: np.ndarray, bank, tick: int) -> List[int]:
+        self._ensure_scan(bank)
+
+        # Linear mode gate: dot(state, weights) + bias
+        weights = self.current_params[:-1]
+        bias = self.current_params[-1]
+        mode_signal = float(np.dot(state, weights) + bias)
+
+        if mode_signal > 0.0:
+            return self.scan_subpolicy.get_actions(bank, tick)
+        else:
+            return self.astar_subpolicy.get_actions(bank, tick)
+
+    def store_reward(self, reward: float, done: bool = False):
+        self._run_reward += reward
+
+    def end_run(self):
+        self.fitnesses[self.eval_idx] = self._run_reward
+        self._run_reward = 0.0
+        self.eval_idx += 1
+        if self.eval_idx >= self.pop_size:
+            self._evolve()
+        else:
+            self.current_params = self.population[self.eval_idx]
+
+    def update(self):
+        return 0.0
+
+    def _evolve(self):
+        ranked = sorted(range(self.pop_size), key=lambda i: -self.fitnesses[i])
+        elite_size = max(self.pop_size // 3, 2)
+        elite = [self.population[i] for i in ranked[:elite_size]]
+
+        if self.fitnesses[ranked[0]] > self.best_fitness:
+            self.best_fitness = self.fitnesses[ranked[0]]
+            self.best_params = self.population[ranked[0]].copy()
+
+        self.mean = np.mean(elite, axis=0)
+        self.sigma *= 0.95 if self.generation > 5 else 1.0
+        self.sigma = max(self.sigma, 0.01)
+
+        self.generation += 1
+        self._generate_population()
+
+    def save(self, path: str):
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        np.save(f"{path}_meta_weights.npy", self.best_params)
+        np.save(f"{path}_meta_mean.npy", self.mean)
+        state = {
+            'sigma': self.sigma,
+            'generation': self.generation,
+            'best_fitness': self.best_fitness,
+            'eval_idx': self.eval_idx,
+        }
+        np.save(f"{path}_meta_state.npy", np.array([state], dtype=object))
+
+    def load(self, path: str):
+        weights_path = f"{path}_meta_weights.npy"
+        mean_path = f"{path}_meta_mean.npy"
+        state_path = f"{path}_meta_state.npy"
+
+        if os.path.exists(weights_path):
+            self.best_params = np.load(weights_path)
+            self.param_dim = len(self.best_params)
+            self.mean = np.load(mean_path) if os.path.exists(mean_path) else self.best_params.copy()
+            if os.path.exists(state_path):
+                state = np.load(state_path, allow_pickle=True)[0]
+                self.sigma = state.get('sigma', self.sigma)
+                self.generation = state.get('generation', 0)
+                self.best_fitness = state.get('best_fitness', -float('inf'))
+            self.current_params = self.best_params.copy()
+            self._generate_population()

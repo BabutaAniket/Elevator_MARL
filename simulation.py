@@ -10,16 +10,17 @@ from agents import (PPOAgent, ScanController, NearestFirstController,
                     DQNAgent, REINFORCEAgent,
                     QLearningController, CMAESController,
                     RoundRobinController, IdleWaitController,
-                    AStarScanPPOController, QRDQNAgent)
+                    AStarScanPPOController, QRDQNAgent,
+                    MetaCMAESController)
 from traffic import TrafficGenerator
 from database import create_run, save_tick, finish_run, save_training_log, save_run_summary
 from config import FLOOR_NAMES, NUM_FLOORS
 
 
 RL_ALGORITHMS = {'ppo', 'dqn', 'reinforce', 'qlearning', 'cmaes',
-                 'astar_scan_ppo', 'qrdqn'}
+                 'astar_scan_ppo', 'qrdqn', 'meta_cmaes'}
 TRAINABLE_ALGORITHMS = {'ppo', 'dqn', 'reinforce', 'cmaes',
-                        'astar_scan_ppo', 'qrdqn'}
+                        'astar_scan_ppo', 'qrdqn', 'meta_cmaes'}
 
 # ── Training run logger ────────────────────────────────────────────────────────
 os.makedirs('logs', exist_ok=True)
@@ -207,6 +208,18 @@ class SimulationRunner:
                 self.qrdqn_b = QRDQNAgent('B')
                 self.qrdqn_a.load('models/qrdqn_bank_a.pt')
                 self.qrdqn_b.load('models/qrdqn_bank_b.pt')
+        elif algorithm == 'meta_cmaes':
+            if not (_reuse_agents and hasattr(self, 'meta_cmaes_a') and self.meta_cmaes_a):
+                self.meta_cmaes_a = MetaCMAESController('A', bank=self.env.bank_a)
+                self.meta_cmaes_b = MetaCMAESController('B', bank=self.env.bank_b)
+
+                # MARATHON PROTECTION: Load Elite if evaluating, Latest if training
+                if not train_ppo and os.path.exists('models/best_meta_cmaes_bank_a_meta_weights.npy'):
+                    self.meta_cmaes_a.load('models/best_meta_cmaes_bank_a')
+                    self.meta_cmaes_b.load('models/best_meta_cmaes_bank_b')
+                else:
+                    self.meta_cmaes_a.load('models/meta_cmaes_bank_a')
+                    self.meta_cmaes_b.load('models/meta_cmaes_bank_b')
 
         self.run_id = create_run(
             name=name, algorithm=algorithm,
@@ -337,6 +350,10 @@ class SimulationRunner:
             self.cmaes_a.store_reward(reward_a)
             self.cmaes_b.store_reward(reward_b)
 
+        elif algo == 'meta_cmaes':
+            self.meta_cmaes_a.store_reward(reward_a)
+            self.meta_cmaes_b.store_reward(reward_b)
+
         elif algo == 'astar_scan_ppo':
             self.asp_a.store_reward(reward_a)
             self.asp_b.store_reward(reward_b)
@@ -444,6 +461,22 @@ class SimulationRunner:
         elif algo == 'qrdqn' and self.qrdqn_a:
             self.qrdqn_a.save('models/qrdqn_bank_a.pt')
             self.qrdqn_b.save('models/qrdqn_bank_b.pt')
+        elif algo == 'meta_cmaes' and hasattr(self, 'meta_cmaes_a') and self.meta_cmaes_a:
+            if self.train_ppo:
+                self.meta_cmaes_a.end_run()
+                self.meta_cmaes_b.end_run()
+            self.meta_cmaes_a.save('models/meta_cmaes_bank_a')
+            self.meta_cmaes_b.save('models/meta_cmaes_bank_b')
+
+            # ELITE CHECKPOINTING for the Meta-Controller
+            if self.train_ppo:
+                if not hasattr(self, 'best_meta_reward'):
+                    self.best_meta_reward = -float('inf')
+                if self.cumulative_reward > self.best_meta_reward:
+                    self.best_meta_reward = self.cumulative_reward
+                    self.meta_cmaes_a.save('models/best_meta_cmaes_bank_a')
+                    self.meta_cmaes_b.save('models/best_meta_cmaes_bank_b')
+                    _train_logger.info(f"*** NEW ELITE META-POLICY SAVED! Reward: {self.best_meta_reward:.1f} ***")
 
     def _get_actions(self):
         sim_time = self.sim_start_time + self.env.tick
@@ -498,6 +531,11 @@ class SimulationRunner:
             state_b = self.env.get_state('B')
             actions_a = self.qrdqn_a.select_action(state_a, self.env.bank_a)
             actions_b = self.qrdqn_b.select_action(state_b, self.env.bank_b)
+        elif algo == 'meta_cmaes':
+            state_a = self.env.get_state('A')
+            state_b = self.env.get_state('B')
+            actions_a = self.meta_cmaes_a.select_action(state_a, self.env.bank_a, self.env.tick)
+            actions_b = self.meta_cmaes_b.select_action(state_b, self.env.bank_b, self.env.tick)
         else:
             actions_a = [3] * 8
             actions_b = [3] * 8
