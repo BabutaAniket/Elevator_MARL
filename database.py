@@ -61,6 +61,18 @@ def init_db():
         timestamp TEXT
     )''')
 
+    # Migrate: add avg_journey_time column if this is an existing DB
+    try:
+        c.execute('ALTER TABLE tick_stats ADD COLUMN avg_journey_time REAL DEFAULT 0')
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+    # Migrate: store accurate in-memory run-level summary (avoids single-tick distortion)
+    try:
+        c.execute('ALTER TABLE simulation_runs ADD COLUMN run_summary_json TEXT')
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -88,11 +100,12 @@ def save_tick(run_id: int, info: dict):
     c.execute('''INSERT INTO tick_stats
         (run_id, tick, total_waiting, avg_wait, max_wait, p95_wait,
          total_delivered, throughput_per_min, total_energy, tick_energy,
-         floor_waiting_json, lifts_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+         avg_journey_time, floor_waiting_json, lifts_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (run_id, info['tick'], info['total_waiting'], info['avg_wait'],
          info['max_wait'], info['p95_wait'], info['total_delivered'],
          info['throughput_per_min'], info['total_energy'], info['tick_energy'],
+         info.get('avg_journey_time', 0),
          json.dumps(info['floor_waiting']),
          json.dumps(info['bank_a_lifts'] + info['bank_b_lifts'])))
     conn.commit()
@@ -104,6 +117,15 @@ def finish_run(run_id: int, ticks: int):
     c = conn.cursor()
     c.execute('''UPDATE simulation_runs SET end_time=?, sim_duration_ticks=?, status='completed'
                  WHERE id=?''', (datetime.now().isoformat(), ticks, run_id))
+    conn.commit()
+    conn.close()
+
+
+def save_run_summary(run_id: int, summary: dict):
+    """Persist accurate in-memory aggregate stats alongside the run record."""
+    conn = get_db()
+    conn.execute('UPDATE simulation_runs SET run_summary_json=? WHERE id=?',
+                 (json.dumps(summary), run_id))
     conn.commit()
     conn.close()
 
@@ -165,6 +187,7 @@ def get_run_summary(run_id: int) -> dict:
             MAX(total_energy)                       AS total_energy,
             ROUND(AVG(throughput_per_min), 2)       AS avg_throughput,
             MAX(total_waiting)                      AS peak_waiting,
+            ROUND(AVG(avg_journey_time), 2)         AS mean_avg_journey_time,
             COUNT(*)                                AS sample_count
         FROM tick_stats WHERE run_id=?
     ''', (run_id,)).fetchone()
@@ -172,6 +195,13 @@ def get_run_summary(run_id: int) -> dict:
     result = dict(run)
     if stats:
         result.update(dict(stats))
+    # Prefer the accurate in-memory summary saved at run end over tick_stats
+    # aggregates (which can be distorted when only one tick row was saved).
+    if result.get('run_summary_json'):
+        try:
+            result.update(json.loads(result['run_summary_json']))
+        except Exception:
+            pass
     if result.get('config_json'):
         try:
             result['config'] = json.loads(result['config_json'])

@@ -104,6 +104,8 @@
         .modal-btns .btn { font-size: 14px; }
         .btn-danger { background: #a44; color: #fff; border-color: #a44; }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <div class="header">
@@ -244,12 +246,12 @@
                     <div class="value" id="mActive">0</div>
                 </div>
                 <div class="metric">
-                    <div class="label">Reward A</div>
-                    <div class="value" id="mRewardA">0</div>
+                    <div class="label">Reward</div>
+                    <div class="value" id="mReward">0</div>
                 </div>
                 <div class="metric">
-                    <div class="label">Reward B</div>
-                    <div class="value" id="mRewardB">0</div>
+                    <div class="label">Avg Journey (s)</div>
+                    <div class="value" id="mJourney">0</div>
                 </div>
             </div>
 
@@ -356,7 +358,20 @@
             <div class="modal-btns">
                 <button class="btn active" id="atStartBtn" onclick="startAutoTrain()">&#9654; Start Auto-Train</button>
                 <button class="btn btn-danger" id="atStopBtn" onclick="stopAutoTrain()" style="display:none;">&#9646;&#9646; Stop</button>
+                <button class="btn" id="atSummaryBtn" onclick="openAutoTrainSummary()" style="display:none;">&#128202; View Summary</button>
                 <button class="btn" onclick="closeAutoTrain()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto-Train Summary Modal -->
+    <div class="modal-overlay" id="atSummaryModal" onclick="if(event.target===this)closeAutoTrainSummary()">
+        <div class="modal-box" style="width:860px;max-height:90vh;overflow-y:auto;">
+            <h2>&#128202; Auto-Train Summary</h2>
+            <div id="atSummaryContent" style="font-size:13px;"></div>
+            <div class="modal-btns" style="margin-top:14px;">
+                <button class="btn active" onclick="downloadAutoTrainSummary()">&#11015; Download Summary</button>
+                <button class="btn" onclick="closeAutoTrainSummary()">Close</button>
             </div>
         </div>
     </div>
@@ -483,8 +498,8 @@
         document.getElementById('mThroughput').textContent = data.throughput_per_min || 0;
         document.getElementById('mEnergy').textContent = (data.total_energy || 0).toFixed(0);
         document.getElementById('mActive').textContent = data.active_passengers || 0;
-        document.getElementById('mRewardA').textContent = (data.cumulative_reward_a || 0).toFixed(1);
-        document.getElementById('mRewardB').textContent = (data.cumulative_reward_b || 0).toFixed(1);
+        document.getElementById('mReward').textContent = (data.cumulative_reward || 0).toFixed(1);
+        document.getElementById('mJourney').textContent = (data.avg_journey_time || 0).toFixed(1);
 
         const statusEl = document.getElementById('statusLabel');
         if (data.running && !data.paused) {
@@ -682,7 +697,7 @@
             if (currentRunId) window.open('/results/' + currentRunId, '_blank');
         };
         document.getElementById('smPdf').onclick = () => {
-            if (currentRunId) window.open('/results/' + currentRunId, '_blank');
+            if (currentRunId) window.open('/results/' + currentRunId + '?pdf=1', '_blank');
         };
         document.getElementById('summaryModal').classList.add('open');
     }
@@ -811,10 +826,179 @@
                             `✓ Completed ${cur} / ${tot} runs`;
                         document.getElementById('atEstimate').textContent = 'Done!';
                     }
+                    if (data.has_summary) {
+                        document.getElementById('atSummaryBtn').style.display = '';
+                    }
                     loadRuns();
                 }
             } catch(e) {}
         }, 1000);
+    }
+
+    function openAutoTrainSummary() {
+        document.getElementById('atSummaryModal').classList.add('open');
+        fetchAndRenderSummary();
+    }
+
+    function closeAutoTrainSummary() {
+        document.getElementById('atSummaryModal').classList.remove('open');
+    }
+
+    async function downloadAutoTrainSummary() {
+        const contentEl = document.getElementById('atSummaryContent');
+        if (!contentEl || !contentEl.innerHTML.trim()) {
+            alert('No summary to download — please wait for it to load.');
+            return;
+        }
+        const btn = document.querySelector('#atSummaryModal .btn.active');
+        if (btn) { btn.textContent = 'Generating\u2026'; btn.disabled = true; }
+
+        // Wrap content in a styled page for capture
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'position:fixed;top:0;left:0;width:900px;background:#fff;padding:24px;font-family:Verdana,sans-serif;font-size:13px;z-index:-1;';
+        wrapper.innerHTML = '<h2 style="margin-bottom:12px;">&#128202; Auto-Train Summary</h2>' + contentEl.innerHTML;
+        document.body.appendChild(wrapper);
+
+        try {
+            const canvas = await html2canvas(wrapper, { scale: 1.5, useCORS: true, logging: false, backgroundColor: '#ffffff' });
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pageW = pdf.internal.pageSize.getWidth();
+            const pageH = pdf.internal.pageSize.getHeight();
+            const imgData = canvas.toDataURL('image/jpeg', 0.92);
+            const imgH = (canvas.height * pageW) / canvas.width;
+            let yOffset = 0, pageNum = 0;
+            while (yOffset < imgH) {
+                if (pageNum > 0) pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, -yOffset, pageW, imgH);
+                yOffset += pageH;
+                pageNum++;
+            }
+            const algo = (document.getElementById('atSummaryContent').textContent.match(/^(\S+)/) || ['summary'])[0].toLowerCase();
+            pdf.save('auto-train-summary-' + algo + '.pdf');
+        } catch(e) {
+            alert('PDF generation failed: ' + e.message);
+        } finally {
+            document.body.removeChild(wrapper);
+            if (btn) { btn.textContent = '\u2b07 Download Summary'; btn.disabled = false; }
+        }
+    }
+
+    async function fetchAndRenderSummary() {
+        const el = document.getElementById('atSummaryContent');
+        el.innerHTML = '<p style="color:#888;">Loading…</p>';
+        let s;
+        try {
+            const res = await fetch('/api/auto_train/summary');
+            s = await res.json();
+        } catch(e) {
+            el.innerHTML = '<p style="color:red;">Failed to load summary.</p>';
+            return;
+        }
+        if (!s || !s.completed_runs) {
+            el.innerHTML = '<p style="color:#888;">No summary available yet.</p>';
+            return;
+        }
+
+        const avg = s.averages;
+        const best_d = s.best_delivered;
+        const worst_d = s.worst_delivered;
+        const best_w  = s.best_wait;
+        const worst_w = s.worst_wait;
+
+        function badge(val, good, bad, fmt) {
+            const v = fmt ? fmt(val) : val;
+            if (val <= good) return `<span style="color:#2a8a2a;font-weight:bold;">${v}</span>`;
+            if (val >= bad)  return `<span style="color:#c00;font-weight:bold;">${v}</span>`;
+            return `<span style="color:#b87000;font-weight:bold;">${v}</span>`;
+        }
+        function fmt1(n) { return (+n).toFixed(1); }
+        function fmt0(n) { return (+n).toFixed(0); }
+        function runLink(r) {
+            return r.run_id
+                ? `<a href="/results/${r.run_id}" target="_blank" style="color:#1a5f9e;">${r.run_name}</a>`
+                : r.run_name;
+        }
+
+        // Header cards
+        let html = `
+        <p style="color:#555;margin:0 0 12px;">
+            <strong>${s.algorithm}</strong> &mdash; ${s.completed_runs} of ${s.total_runs} runs completed
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+            <div style="background:#f0faf0;border:1px solid #b2d8b2;border-radius:6px;padding:10px;">
+                <div style="font-weight:bold;color:#2a7a2a;margin-bottom:6px;">&#127881; Best Delivery</div>
+                <div>${runLink(best_d)}</div>
+                <div>Delivered: <strong>${best_d.delivered}</strong></div>
+                <div>Avg Wait: ${fmt1(best_d.mean_avg_wait)}s</div>
+                <div>Reward: ${fmt1(best_d.reward)}</div>
+            </div>
+            <div style="background:#fff8f0;border:1px solid #f0c080;border-radius:6px;padding:10px;">
+                <div style="font-weight:bold;color:#b87000;margin-bottom:6px;">&#8987; Best Wait Time</div>
+                <div>${runLink(best_w)}</div>
+                <div>Avg Wait: <strong>${fmt1(best_w.mean_avg_wait)}s</strong></div>
+                <div>Delivered: ${best_w.delivered}</div>
+                <div>Reward: ${fmt1(best_w.reward)}</div>
+            </div>
+            <div style="background:#fef0f0;border:1px solid #f0b0b0;border-radius:6px;padding:10px;">
+                <div style="font-weight:bold;color:#a00;margin-bottom:6px;">&#128532; Worst Delivery</div>
+                <div>${runLink(worst_d)}</div>
+                <div>Delivered: <strong>${worst_d.delivered}</strong></div>
+                <div>Avg Wait: ${fmt1(worst_d.mean_avg_wait)}s</div>
+                <div>Reward: ${fmt1(worst_d.reward)}</div>
+            </div>
+        </div>
+
+        <div style="background:#f5f5ff;border:1px solid #c0c0e0;border-radius:6px;padding:10px;margin-bottom:16px;">
+            <div style="font-weight:bold;color:#333;margin-bottom:8px;">&#10133; Averages Across All Runs</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:12px;">
+                <div><div style="color:#888;">Avg Delivered</div><div style="font-size:16px;font-weight:bold;">${fmt0(avg.delivered)}</div></div>
+                <div><div style="color:#888;">Avg Wait (s)</div><div style="font-size:16px;font-weight:bold;">${badge(avg.mean_avg_wait,30,60,fmt1)}</div></div>
+                <div><div style="color:#888;">Avg Journey (s)</div><div style="font-size:16px;font-weight:bold;">${fmt1(avg.avg_journey_time)}</div></div>
+                <div><div style="color:#888;">Avg Energy</div><div style="font-size:16px;font-weight:bold;">${fmt0(avg.energy)}</div></div>
+                <div><div style="color:#888;">Peak Concurrent</div><div style="font-size:16px;font-weight:bold;">${badge(avg.peak_concurrent,20,50,fmt1)}</div></div>
+                <div><div style="color:#888;">Peak Max Wait (s)</div><div style="font-size:16px;font-weight:bold;">${badge(avg.peak_max_wait,60,120,fmt1)}</div></div>
+                <div><div style="color:#888;">Avg Reward</div><div style="font-size:16px;font-weight:bold;">${fmt1(avg.reward)}</div></div>
+            </div>
+        </div>`;
+
+        // Per-run table
+        html += `
+        <div style="font-weight:bold;margin-bottom:6px;">All Runs</div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+                <tr style="background:#eee;">
+                    <th style="padding:5px 8px;text-align:left;border-bottom:1px solid #ccc;">#</th>
+                    <th style="padding:5px 8px;text-align:left;border-bottom:1px solid #ccc;">Run</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Delivered</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Avg Wait (s)</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Peak Wait (s)</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Journey (s)</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Peak Conc.</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Energy</th>
+                    <th style="padding:5px 8px;text-align:right;border-bottom:1px solid #ccc;">Reward</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+        s.runs.forEach((r, idx) => {
+            const rowBg = idx % 2 === 0 ? '#fff' : '#f9f9f9';
+            html += `<tr style="background:${rowBg};">
+                <td style="padding:4px 8px;">${r.run_num}</td>
+                <td style="padding:4px 8px;">${runLink(r)}</td>
+                <td style="padding:4px 8px;text-align:right;">${r.delivered}</td>
+                <td style="padding:4px 8px;text-align:right;">${badge(r.mean_avg_wait,30,60,fmt1)}</td>
+                <td style="padding:4px 8px;text-align:right;">${badge(r.peak_max_wait,60,120,fmt1)}</td>
+                <td style="padding:4px 8px;text-align:right;">${fmt1(r.avg_journey_time)}</td>
+                <td style="padding:4px 8px;text-align:right;">${badge(r.peak_concurrent,20,50,v=>v)}</td>
+                <td style="padding:4px 8px;text-align:right;">${fmt0(r.energy)}</td>
+                <td style="padding:4px 8px;text-align:right;">${fmt1(r.reward)}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+
+        el.innerHTML = html;
     }
     </script>
 </body>

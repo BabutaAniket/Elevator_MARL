@@ -299,8 +299,34 @@ class BuildingEnvironment:
 
             if LiftAction(safe[i]) in (LiftAction.MOVE_UP, LiftAction.MOVE_DOWN):
                 new_dir = Direction.UP if LiftAction(safe[i]) == LiftAction.MOVE_UP else Direction.DOWN
+                
+                # ─────────────────────────────────────────────────────────────────
+                # THE KINEMATIC LOCK (Directional Collective Control)
+                # Prevent any algorithm from doing a U-Turn mid-shaft if there 
+                # is still work remaining in its current direction.
+                # ─────────────────────────────────────────────────────────────────
                 if lift.direction != Direction.IDLE and new_dir != lift.direction:
-                    if (self.tick - lift.last_reversal_tick) < DIRECTION_REVERSAL_COOLDOWN:
+                    has_work_ahead = False
+                    
+                    if lift.direction == Direction.UP:
+                        # Are there passengers inside going further up?
+                        if any(d > lift.floor for d in lift.destinations):
+                            has_work_ahead = True
+                        # Are there people waiting in the hallway above us?
+                        elif any(bank.get_waiting_count(f) > 0 for f in range(lift.floor + 1, NUM_FLOORS)):
+                            has_work_ahead = True
+                            
+                    elif lift.direction == Direction.DOWN:
+                        # Are there passengers inside going further down?
+                        if any(d < lift.floor for d in lift.destinations):
+                            has_work_ahead = True
+                        # Are there people waiting in the hallway below us?
+                        elif any(bank.get_waiting_count(f) > 0 for f in range(lift.floor - 1, -1, -1)):
+                            has_work_ahead = True
+                            
+                    if has_work_ahead:
+                        # Override the AI's attempt to reverse. Force it to idle this tick 
+                        # so it can realize its mistake and continue its sweep next tick.
                         safe[i] = int(LiftAction.IDLE)
 
         # Opportunistic pickup: if an EMPTY lift is at a floor with waiting passengers,
@@ -485,59 +511,73 @@ class BuildingEnvironment:
                 lift.direction = Direction.DOWN
 
         exchanged = len(alighting) + boarded
-        lift.door_timer = min(max(3, 3 + exchanged), DOOR_OPEN_MAX)
+
+        # If the lift stopped but exchanged 0 passengers due to a direction
+        # mismatch (it has onboard passengers going one way, waiting passengers
+        # going the other), force a quick 3-tick door close and reset direction
+        # so the lift breaks out of the floor lock and keeps moving.
+        if exchanged == 0 and lift.load > 0:
+            lift.door_timer = 3
+            lift.direction = Direction.IDLE
+        else:
+            lift.door_timer = min(max(3, 3 + exchanged), DOOR_OPEN_MAX)
 
     def _compute_reward(self, bank: LiftBank) -> float:
-        if bank.bank_id == 'A':
-            deliveries = self.tick_deliveries_a
-            pickups = self.tick_pickups_a
-        else:
-            deliveries = self.tick_deliveries_b
-            pickups = self.tick_pickups_b
+        """Unified reward with logarithmic base penalties and a starvation guardrail.
 
-        # Action-dependent rewards (strong signal — directly caused by agent)
-        delivery_reward = deliveries * 30.0
-        pickup_reward = pickups * 10.0
+        Reward = W_DEL * Deliveries
+               - W_ENG * Energy
+               - 5 * ln(1 + wait_avg / 10)    [when passengers queue]
+               - 5 * ln(1 + inside_avg / 10)  [when passengers ride]
+               - starvation_penalty            [linear bleed if any wait > 300 s]
 
-        num_waiting = 0
-        total_wait_seconds = 0.0
-        num_critical = 0
-        for floor_calls in bank.hall_calls.values():
-            for p in floor_calls:
-                w = self.tick - p.arrival_time
-                num_waiting += 1
-                total_wait_seconds += w
-                if w > MAX_WAIT_BOUND:
-                    num_critical += 1
+        The starvation guardrail overrides the flat log curve when a single
+        passenger has been waiting more than 5 minutes, forcing the agent to
+        service neglected floors rather than optimising the average.
+        """
+        W_DEL = 1.0
+        W_ENG = 0.005  # slightly increased to balance the stronger wait penalties
 
-        wait_penalty = 0.0
-        if num_waiting > 0:
-            avg_w = total_wait_seconds / num_waiting
-            wait_penalty = -0.1 * math.log1p(avg_w / 10.0)
+        deliveries = self.tick_deliveries_a if bank.bank_id == 'A' else self.tick_deliveries_b
 
-        # Log-scaled: 400 critical -> -30 instead of -2000
-        critical_penalty = -5.0 * math.log1p(num_critical)
-
-        crowding_penalty = 0.0
-        for f in range(NUM_FLOORS):
-            c = bank.get_waiting_count(f)
-            if c > PEAK_FLOOR_WAIT_BOUND:
-                crowding_penalty -= 1.0 * math.log1p(c - PEAK_FLOOR_WAIT_BOUND)
-
-        rolling_avg = bank.get_rolling_avg_wait()
-        sla_penalty = 0.0
-        if rolling_avg > MEAN_WAIT_BOUND:
-            sla_penalty = -0.5 * (rolling_avg - MEAN_WAIT_BOUND) / MEAN_WAIT_BOUND
-
-        energy_cost = 0.0
+        # Energy consumed by this bank's lifts this tick
+        tick_energy = 0.0
         for lift in bank.lifts:
             if lift.state == LiftState.MOVING:
-                energy_cost -= 0.01 * (1 + lift.load * 0.1)
+                tick_energy += 1.0 + 0.1 * lift.load
+            elif lift.state in (LiftState.DOOR_OPEN, LiftState.DECELERATING):
+                tick_energy += 2.0
 
-        reward = (delivery_reward + pickup_reward
-                  + wait_penalty + critical_penalty
-                  + crowding_penalty + sla_penalty + energy_cost)
+        # Calculate average AND max hall wait
+        hall_waits = [
+            self.tick - p.arrival_time
+            for calls in bank.hall_calls.values()
+            for p in calls
+        ]
+        wait_avg = float(np.mean(hall_waits)) if hall_waits else 0.0
+        max_wait  = float(np.max(hall_waits))  if hall_waits else 0.0
 
+        # Average time passengers are currently spending inside lifts
+        inside_times = [
+            self.tick - p.board_time
+            for lift in bank.lifts
+            for p in lift.passengers
+            if p.board_time >= 0
+        ]
+        inside_avg = float(np.mean(inside_times)) if inside_times else 0.0
+
+        # ─────────────────────────────────────────────────────────────────
+        # STARVATION GUARDRAIL: linear penalty kicks in when any passenger
+        # has waited more than 5 minutes (300 s), overriding the flat log
+        # curve and forcing the agent to service neglected floors.
+        # ─────────────────────────────────────────────────────────────────
+        starvation_penalty = (max_wait - 300) / 50.0 if max_wait > 300 else 0.0
+
+        reward = (W_DEL * deliveries
+                  - W_ENG * tick_energy
+                  - 5.0 * math.log1p(wait_avg / 10.0)
+                  - 5.0 * math.log1p(inside_avg / 10.0)
+                  - starvation_penalty)
         return reward
 
     def get_state(self, bank_id: str) -> np.ndarray:
@@ -594,6 +634,15 @@ class BuildingEnvironment:
 
         recent_delivered = [p for p in self.delivered_passengers if p.alight_time >= self.tick - 60]
 
+        # Avg journey time (board → alight) from recently delivered passengers (300-tick window)
+        recent_window = [p for p in self.delivered_passengers if p.alight_time >= self.tick - 300]
+        recent_journeys = [
+            p.alight_time - p.board_time
+            for p in recent_window
+            if p.board_time >= 0 and p.alight_time > p.board_time
+        ]
+        avg_journey_time = float(np.mean(recent_journeys)) if recent_journeys else 0.0
+
         return {
             'tick': self.tick,
             'total_waiting': len(all_waiting),
@@ -604,6 +653,7 @@ class BuildingEnvironment:
             'throughput_per_min': len(recent_delivered),
             'total_energy': self.total_energy,
             'tick_energy': self.tick_energy,
+            'avg_journey_time': avg_journey_time,
             'pickups': self.tick_pickups,
             'deliveries': self.tick_deliveries,
             'bank_a_lifts': [self._lift_info(l) for l in self.bank_a.lifts],

@@ -45,12 +45,14 @@
 
         .footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #eee; font-size: 12px; color: #aaa; display: flex; justify-content: space-between; }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="page">
 
     <div class="no-print btn-row">
-        <button class="btn" onclick="printReport()">&#11015; Download PDF / Print</button>
+        <button class="btn" id="downloadBtn" onclick="downloadPDF()">&#11015; Download PDF</button>
         <a class="btn outline" href="/">&#8592; Back to Simulator</a>
     </div>
 
@@ -101,6 +103,8 @@
     {% set thr = summary.get('avg_throughput', 0) or 0 %}
     {% set pw = summary.get('peak_waiting', 0) or 0 %}
     {% set energy = summary.get('total_energy', 0) or 0 %}
+    {% set mjt = summary.get('mean_avg_journey_time', 0) or 0 %}
+    {% set rew = summary.get('total_reward', none) %}
     <table>
         <thead><tr><th>Metric</th><th>Value</th><th>Unit</th><th>Assessment</th><th>Description</th></tr></thead>
         <tbody>
@@ -154,6 +158,22 @@
                 <td>Move = 1.0 + 0.1×load; Door open = 2.0; Deceleration = 2.0</td>
             </tr>
             <tr>
+                <td>Mean Avg Journey Time</td>
+                <td class="{{ 'bad' if mjt > 120 else 'warn' if mjt > 60 else 'good' }}">{{ '%.1f' | format(mjt) }}</td>
+                <td>seconds</td>
+                <td>{{ 'Slow (&gt;120s)' if mjt > 120 else 'Fair (60\u2013120s)' if mjt > 60 else 'Good (&lt;60s)' }}</td>
+                <td>Average ride time from boarding to alighting, over 300-tick rolling windows</td>
+            </tr>
+            {% if rew is not none %}
+            <tr>
+                <td>Cumulative Reward</td>
+                <td class="{{ 'good' if rew > 0 else 'warn' if rew > -1000 else 'bad' }}">{{ '%.1f' | format(rew) }}</td>
+                <td>reward units</td>
+                <td>{{ 'Positive' if rew > 0 else 'Near zero' if rew > -1000 else 'Negative' }}</td>
+                <td>Sum of per-tick rewards: +delivery − energy − 0.1×ln(1+wait/10) − 0.1×ln(1+journey/10)</td>
+            </tr>
+            {% endif %}
+            <tr>
                 <td>Data Samples Recorded</td>
                 <td>{{ summary.get('sample_count', 0) }}</td>
                 <td>ticks sampled</td>
@@ -185,6 +205,12 @@
     <div class="chart-wrap">
         <div class="chart-label">&#9889; Energy consumed per tick (moving lifts + door operations)</div>
         <canvas id="energyChart" width="900" height="320"></canvas>
+    </div>
+
+    <h2>Average Journey Time</h2>
+    <div class="chart-wrap">
+        <div class="chart-label">&#128664; Average ride time (boarding to alighting) in seconds — 300-tick rolling window</div>
+        <canvas id="journeyChart" width="900" height="320"></canvas>
     </div>
 
     <div class="footer">
@@ -334,7 +360,7 @@ async function loadCharts() {
         stats = await res.json();
     } catch(e) {
         console.error('Chart load failed:', e);
-        ['waitChart','throughputChart','waitingChart','energyChart'].forEach(id => {
+        ['waitChart','throughputChart','waitingChart','energyChart','journeyChart'].forEach(id => {
             const c = document.getElementById(id);
             if (!c) return;
             const ctx = c.getContext('2d');
@@ -347,7 +373,7 @@ async function loadCharts() {
     }
 
     if (!stats || stats.length < 2) {
-        ['waitChart','throughputChart','waitingChart','energyChart'].forEach(id =>
+        ['waitChart','throughputChart','waitingChart','energyChart','journeyChart'].forEach(id =>
             drawChart(id, [0, 1], null, '', '#999')
         );
         return;
@@ -363,28 +389,74 @@ async function loadCharts() {
               stats.map(s => s.total_waiting       || 0), 'Waiting Passengers',  '#8844cc');
     drawChart('energyChart',     ticks,
               stats.map(s => s.tick_energy         || 0), 'Energy / tick',       '#2255aa');
+    drawChart('journeyChart',    ticks,
+              stats.map(s => s.avg_journey_time    || 0), 'Avg Journey (s)',     '#ff6600');
 }
 
-function printReport() {
-    // Snapshot canvases as images so they survive the print layout reflow
+function downloadPDF() {
+    const btn = document.getElementById('downloadBtn');
+    btn.textContent = 'Generating PDF\u2026';
+    btn.disabled = true;
+
+    // Swap canvases for static PNG snapshots so html2canvas captures them
     const conversions = [];
     document.querySelectorAll('canvas').forEach(canvas => {
         const img = document.createElement('img');
         img.src = canvas.toDataURL('image/png');
-        img.style.width  = '100%';
-        img.style.height = 'auto';
-        img.style.border = '1px solid #ddd';
-        img.style.borderRadius = '4px';
-        img.style.display = 'block';
-        img.className = '_print_img';
+        img.style.cssText = 'width:100%;height:auto;display:block;border:1px solid #ddd;border-radius:4px;';
         canvas.parentNode.insertBefore(img, canvas);
         canvas.style.display = 'none';
         conversions.push({ canvas, img });
     });
-    window.print();
-    conversions.forEach(({ canvas, img }) => {
-        canvas.style.display = '';
-        img.remove();
+
+    const restore = () => {
+        conversions.forEach(({ canvas, img }) => { canvas.style.display = ''; img.remove(); });
+        btn.textContent = '\u2b07 Download PDF';
+        btn.disabled = false;
+    };
+
+    html2canvas(document.querySelector('.page'), {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1000,
+        onclone: (doc) => {
+            // Strip decorative styles that html2canvas renders poorly
+            doc.body.style.cssText = 'margin:0;padding:0;background:#fff;';
+            const p = doc.querySelector('.page');
+            if (p) {
+                p.style.boxShadow = 'none';
+                p.style.margin    = '0';
+                p.style.maxWidth  = '960px';
+                p.style.padding   = '28px 32px';
+            }
+            // Ensure chart images fill their wrappers cleanly
+            doc.querySelectorAll('.chart-wrap img').forEach(img => {
+                img.style.width = '100%';
+                img.style.height = 'auto';
+            });
+        }
+    }).then(canvas => {
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageW = pdf.internal.pageSize.getWidth();
+        const pageH = pdf.internal.pageSize.getHeight();
+        // PNG keeps text and table lines crisp (no JPEG compression artifacts)
+        const imgData = canvas.toDataURL('image/png');
+        const imgH = (canvas.height * pageW) / canvas.width;
+        let yOffset = 0, pageNum = 0;
+        while (yOffset < imgH) {
+            if (pageNum > 0) pdf.addPage();
+            pdf.addImage(imgData, 'PNG', 0, -yOffset, pageW, imgH);
+            yOffset += pageH;
+            pageNum++;
+        }
+        pdf.save('lift-rl-report-run-' + RUN_ID + '.pdf');
+        restore();
+    }).catch(err => {
+        alert('PDF generation failed: ' + err.message);
+        restore();
     });
 }
 
@@ -393,6 +465,11 @@ if (document.readyState === 'complete') {
     loadCharts();
 } else {
     window.addEventListener('load', loadCharts);
+}
+
+// Auto-download if ?pdf=1 is in the URL (triggered by dashboard button)
+if (new URLSearchParams(window.location.search).get('pdf') === '1') {
+    window.addEventListener('load', () => setTimeout(downloadPDF, 2000));
 }
 </script>
 </body>

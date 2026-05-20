@@ -4,8 +4,9 @@ from simulation import SimulationRunner
 from database import get_runs, get_run_stats, get_training_logs, get_run_summary, clear_db
 from config import FLOOR_NAMES
 
-# Restrict PyTorch to single thread to avoid GIL contention with Flask/simulation threads
-torch.set_num_threads(1)
+# Allow PyTorch to use multiple cores for training backprop; single thread
+# was throttling PPO updates during Auto-Train.
+torch.set_num_threads(4)
 
 app = Flask(__name__)
 runner = SimulationRunner()
@@ -117,6 +118,11 @@ def start_auto_train():
 @app.route('/api/auto_train/status')
 def auto_train_status():
     return jsonify(runner.get_auto_train_status())
+
+
+@app.route('/api/auto_train/summary')
+def auto_train_summary():
+    return jsonify(runner.auto_train_summary)
 
 
 @app.route('/api/auto_train/stop', methods=['POST'])

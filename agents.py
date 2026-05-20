@@ -24,7 +24,18 @@ def _heuristic_action(bank, lift, accessible):
         return int(LiftAction.IDLE)
     if lift.floor in lift.destinations:
         return int(LiftAction.STOP_OPEN)
-    pickable = [p for p in bank.hall_calls[lift.floor] if p.destination in accessible]
+    # Direction-aware pickup: a loaded lift travelling in a set direction only
+    # collects passengers going the same way, preventing the door-stutter loop
+    # where 0 passengers exchange and the lift is pinned at the floor.
+    pickable = [
+        p for p in bank.hall_calls[lift.floor]
+        if p.destination in accessible
+        and (
+            lift.load == 0
+            or lift.direction == Direction.IDLE
+            or p.desired_direction == lift.direction
+        )
+    ]
     if pickable and not lift.is_full:
         return int(LiftAction.STOP_OPEN)
     if lift.destinations:
@@ -262,10 +273,18 @@ class ScanController:
                 continue
 
             has_dropoff = lift.floor in lift.destinations
-            has_pickup = (len([p for p in bank.hall_calls[lift.floor]
-                               if p.destination in accessible]) > 0
-                          and not lift.is_full
-                          and lift.floor in accessible)
+            # Direction-aware pickup: only stop for passengers going the same way
+            # as the lift's current sweep direction when the lift already has riders.
+            lift_dir = self.lift_dirs[i]
+            has_pickup = (
+                lift.floor in accessible
+                and not lift.is_full
+                and any(
+                    p.destination in accessible
+                    and (lift.load == 0 or p.desired_direction == lift_dir)
+                    for p in bank.hall_calls[lift.floor]
+                )
+            )
 
             if has_dropoff or has_pickup:
                 actions.append(int(LiftAction.STOP_OPEN))
@@ -335,9 +354,20 @@ class NearestFirstController:
                 actions[i] = int(LiftAction.STOP_OPEN)
                 continue
 
-            has_pickup = len([p for p in bank.hall_calls[lift.floor]
-                              if p.destination in accessible]) > 0
-            if has_pickup and not lift.is_full:
+            # Direction-aware pickup: loaded lifts only collect same-direction riders.
+            has_pickup = (
+                not lift.is_full
+                and any(
+                    p.destination in accessible
+                    and (
+                        lift.load == 0
+                        or lift.direction == Direction.IDLE
+                        or p.desired_direction == lift.direction
+                    )
+                    for p in bank.hall_calls[lift.floor]
+                )
+            )
+            if has_pickup:
                 actions[i] = int(LiftAction.STOP_OPEN)
                 continue
 
