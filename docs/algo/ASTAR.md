@@ -1,6 +1,6 @@
 # A* Dispatch (Cost-Minimization Heuristic)
 
-**Type**: Deterministic Heuristic | **Implementation**: `AStarDispatchController` | **Status**: Functional but suboptimal ⚠️
+**Type**: Deterministic Heuristic | **Implementation**: `AStarDispatchController` | **Status**: Functional but suboptimal
 
 ## Overview
 
@@ -45,26 +45,26 @@ load_penalty       = 0.3 (already-loaded lifts discouraged)
 ```
 
 ## Accuracy to Academic Definition
-❌ **Not True to Name**: In computer science, **A\* (A-Star)** is a pathfinding algorithm used to navigate around obstacles in mazes. Elevators travel in straight 1D lines; there are no obstacles to path-find around. 
+Not True to Name: In computer science, **A* (A-Star)** is a pathfinding algorithm used to navigate around obstacles in mazes. Elevators travel in straight 1D lines; there are no obstacles to path-find around. 
 
-Your algorithm is actually a **Greedy Cost-Minimization Heuristic** or **Urgency-Weighted Cost Dispatcher**, not A\*. While it uses heuristic principles similar to A\*, it does not implement A\* pathfinding. The name is a simplification for convenience.
+Your algorithm is actually a **Greedy Cost-Minimization Heuristic** or **Urgency-Weighted Cost Dispatcher**, not A*. While it uses heuristic principles similar to A*, it does not implement A* pathfinding. The name is a simplification for convenience.
 
 ## Strengths
-- ✅ **Urgency-aware** — Prevents indefinite starvation
-- ✅ **Global optimization** — Considers all lifts and all calls, not just per-lift greedy
-- ✅ **Deterministic** — Reproducible results
-- ✅ **Moderate energy efficiency** — Lifts idle when not needed
+- Urgency-aware: Prevents indefinite starvation
+- Global optimization: Considers all lifts and all calls, not just per-lift greedy
+- Deterministic: Reproducible results
+- Moderate energy efficiency: Lifts idle when not needed
 
 ## Weaknesses
-- ❌ **Point-to-point dispatch** — Assigns to individual floors, not sweeps
-- ❌ **Inefficient during multi-floor congestion** — A lift serving one floor then repositioning is wasteful
-- ❌ **No directional momentum** — Each lift operates independently on each tick
-- ❌ **Stutter loops possible** — Without direction awareness, can trap elevators opening doors
+- Point-to-point dispatch: Assigns to individual floors, not sweeps
+- Inefficient during multi-floor congestion: A lift serving one floor then repositioning is wasteful
+- No directional momentum: Each lift operates independently on each tick
+- Stutter loops possible: Without direction awareness, can trap elevators opening doors
 
 ## Performance Characteristics
-- **Mean Wait Time**: ~65–70 seconds ❌ (significantly worse than SCAN)
+- **Mean Wait Time**: ~65–70 seconds (significantly worse than SCAN)
 - **Peak Wait Time**: ~180–220 seconds
-- **Peak Concurrent Waiting**: ~400–450 passengers ❌ (massive queue buildup)
+- **Peak Concurrent Waiting**: ~400–450 passengers (massive queue buildup)
 - **Energy Efficiency**: Good (lower throughput means idle periods)
 - **Fairness Index**: Moderate (urgency prevents complete starvation, but assignment is greedy)
 
@@ -73,8 +73,8 @@ Your algorithm is actually a **Greedy Cost-Minimization Heuristic** or **Urgency
 | Metric | Value |
 |--------|-------|
 | Delivered | ~6,800 |
-| Mean avg wait | **~65–70 s** ❌ |
-| Peak waiting | **~400–450** ❌ |
+| Mean avg wait | ~65–70 s |
+| Peak waiting | ~400–450 |
 | Energy | ~196,000 |
 
 ## Why It Underperforms vs SCAN
@@ -108,10 +108,10 @@ A* Dispatch behavior:
 ```
 
 ## When A* Dispatch Works Well
-- ✅ **Low-load scenarios** (< 50% capacity utilization)
-- ✅ **Uniform demand** across all floors
-- ✅ **Bidirectional traffic** (mixed up/down demand)
-- ❌ **NOT suitable for rush hours** (worst-case performance)
+- Low-load scenarios (< 50% capacity utilization)
+- Uniform demand across all floors
+- Bidirectional traffic (mixed up/down demand)
+- Not suitable for rush hours (worst-case performance)
 
 ## Recommendations
 - **Use SCAN** for predictable directional traffic (morning/evening rush)

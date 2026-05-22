@@ -1,6 +1,6 @@
 # Pure Reinforcement Learning (CMA-ES / PPO)
 
-**Type**: Neural Network Policy | **Implementation**: `CMAESController`, `PPOController` | **Status**: Requires training ⚠️
+**Type**: Neural Network Policy | **Implementation**: `CMAESController`, `PPOController` | **Status**: Requires training
 
 ## Overview
 
@@ -145,39 +145,39 @@ This multi-objective formulation prevents the exploits documented in [PROBLEM.md
 ### One generation = 12 × 512 = 6,144 ticks ≈ 102 minutes of simulation
 
 ## Accuracy to Academic Definition
-✅ **True to Name**: Yes. Both CMA-ES and PPO are authentic implementations of published algorithms.
+True to Name: Yes. Both CMA-ES and PPO are authentic implementations of published algorithms.
 
-- **CMA-ES**: Exact match to [Hansen & Ostermeier (2001)](https://arxiv.org/pdf/1604.00772.pdf)
-- **PPO**: Based on [Schulman et al. (2017)](https://arxiv.org/abs/1707.06347)
+- CMA-ES: Exact match to Hansen & Ostermeier (2001)
+- PPO: Based on Schulman et al. (2017)
 
 ## Strengths
-- ✅ **Learns non-linear patterns** — Can discover strategies humans didn't design
-- ✅ **Autonomous** — No manual algorithm engineering
-- ✅ **Adaptive** — Naturally adapts to changing traffic patterns
-- ✅ **Exploratory** — Discovers emergency procedures (e.g., express runs during extreme loads)
+- Learns non-linear patterns: Can discover strategies humans didn't design
+- Autonomous: No manual algorithm engineering
+- Adaptive: Naturally adapts to changing traffic patterns
+- Exploratory: Discovers emergency procedures (e.g., express runs during extreme loads)
 
 ## Weaknesses
-- ❌ **Black box** — Decisions are not interpretable
-- ❌ **Requires extensive training** — 20–50 generations (~4–10 runs of 600 min each)
-- ❌ **Sample inefficient** — CMA-ES in particular wastes many rollouts
-- ❌ **Unstable training** — Can collapse to local minima or pathological strategies
-- ❌ **Regulatory risk** — Unpredictable behaviors scare building safety inspectors
+- Black box: Decisions are not interpretable
+- Requires extensive training: 20–50 generations (4–10 runs of 600 min each)
+- Sample inefficient: CMA-ES in particular wastes many rollouts
+- Unstable training: Can collapse to local minima or pathological strategies
+- Regulatory risk: Unpredictable behaviors scare building safety inspectors
 
 ## Performance Characteristics
-- **Untrained (W=0)**: ~12,000 s mean wait ❌ (catastrophic)
-- **After 10 generations**: ~6–8 s mean wait ⚠️ (approaching SCAN)
-- **After 50 generations**: ~2–4 s mean wait ✅ (beating all heuristics)
-- **Peak Wait Time**: Can achieve <60 s (better than SCAN)
-- **Energy Efficiency**: Excellent (learns to anticipate low-demand periods)
+- Untrained (W=0): ~12,000 s mean wait (catastrophic)
+- After 10 generations: ~6–8 s mean wait (approaching SCAN)
+- After 50 generations: ~2–4 s mean wait (beating all heuristics)
+- Peak Wait Time: Can achieve <60 s (better than SCAN)
+- Energy Efficiency: Excellent (learns to anticipate low-demand periods)
 
 ## Results (Untrained, Run #23)
 
 | Metric | Value | Cause |
 |--------|-------|-------|
-| Delivered | ~600 | Untrained W=0 → random argmax |
-| Mean avg wait | **12,007 s** ❌ | Lifts barely moving |
-| Peak waiting | **4,463** ❌ | Cascading queue collapse |
-| Energy | ~80,107 | 4× less than SCAN (extreme under-utilization) |
+| Delivered | ~600 | Untrained W=0 resulting in random argmax |
+| Mean avg wait | 12,007 s | Lifts barely moving |
+| Peak waiting | 4,463 | Cascading queue collapse |
+| Energy | ~80,107 | 4x less than SCAN (extreme under-utilization) |
 
 The .npy files are 0.4 KB = 40 float32 values = one untrained weight vector (zero-initialized). This is completely untrained.
 
@@ -207,11 +207,11 @@ The .npy files are 0.4 KB = 40 float32 values = one untrained weight vector (zer
 | Model files | models/cmaes_bank_a.npy, models/cmaes_bank_b.npy |
 
 ## When Pure RL Is Optimal
-- ✅ **Long-term deployment** (training cost amortized over years)
-- ✅ **Highly variable traffic** (RL adapts better than heuristics)
-- ✅ **Multi-objective trade-offs** (RL balances complex objectives naturally)
-- ✅ **Research/development** (gaining insights into elevator physics)
-- ❌ **NOT production** (until trustworthiness is established)
+- Long-term deployment (training cost amortized over years)
+- Highly variable traffic (RL adapts better than heuristics)
+- Multi-objective trade-offs (RL balances complex objectives naturally)
+- Research/development (gaining insights into elevator physics)
+- Not suitable for production (until trustworthiness is established)
 
 ## Challenges & Limitations
 

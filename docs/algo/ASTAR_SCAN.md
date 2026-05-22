@@ -1,6 +1,6 @@
 # A* + SCAN (Hybrid Heuristic)
 
-**Type**: Deterministic Hybrid Heuristic | **Implementation**: `AStarScanController` | **Status**: Optimized ✅
+**Type**: Deterministic Hybrid Heuristic | **Implementation**: `AStarScanController` | **Status**: Optimized
 
 ## Overview
 
@@ -64,24 +64,24 @@ distance_normalization = max(|lift.floor − f|, 1) (avoid division by zero)
 ```
 
 ## Accuracy to Academic Definition
-✅ **True to Name**: Yes. It perfectly blends **A* urgency-aware targeting** with **SCAN mechanical sweeping**.
+True to Name: Yes. It perfectly blends **A* urgency-aware targeting** with **SCAN mechanical sweeping**.
 
 ## Strengths
-- ✅ **Cognitive + Mechanical hybrid** — Combines best of both approaches
-- ✅ **High throughput** — Sweep efficiency of SCAN + responsiveness of A*
-- ✅ **Fairness** — Urgency-awareness prevents indefinite starvation
-- ✅ **Low thrashing** — Direction persistence reduces oscillation
-- ✅ **Adaptive reversal** — Re-evaluates at each reversal based on current demand
+- Cognitive + Mechanical hybrid: Combines best of both approaches
+- High throughput: Sweep efficiency of SCAN + responsiveness of A*
+- Fairness: Urgency-awareness prevents indefinite starvation
+- Low thrashing: Direction persistence reduces oscillation
+- Adaptive reversal: Re-evaluates at each reversal based on current demand
 
 ## Weaknesses
-- ⚠️ **Still parameter-dependent** — Urgency weighting (1/30) is empirically tuned
-- ⚠️ **No direction awareness** — Can still cause stutter loops with mismatched directions (though rare with sweep model)
-- ⚠️ **Suboptimal during extreme chaos** — When demand is equally high in both directions, arbitrary choice may not be optimal
+- Still parameter-dependent: Urgency weighting (1/30) is empirically tuned
+- No direction awareness: Can still cause stutter loops with mismatched directions (though rare with sweep model)
+- Suboptimal during extreme chaos: When demand is equally high in both directions, arbitrary choice may not be optimal
 
 ## Performance Characteristics
-- **Mean Wait Time**: ~4–8 seconds ✅ (excellent)
-- **Peak Wait Time**: ~90–120 seconds ✅ (good)
-- **Peak Concurrent Waiting**: ~40–60 passengers ✅ (healthy)
+- **Mean Wait Time**: ~4–8 seconds (excellent)
+- **Peak Wait Time**: ~90–120 seconds (good)
+- **Peak Concurrent Waiting**: ~40–60 passengers (healthy)
 - **Energy Efficiency**: Very good (sweep reduces repositioning)
 - **Fairness Index**: High (urgency-aware + sweep coverage)
 
@@ -90,8 +90,8 @@ distance_normalization = max(|lift.floor − f|, 1) (avoid division by zero)
 | Metric | Value |
 |--------|-------|
 | Delivered | ~12,400 |
-| Mean avg wait | **~4–8 s** ✅ |
-| Peak waiting | **~40–60** ✅ |
+| Mean avg wait | ~4–8 s |
+| Peak waiting | ~40–60 |
 | Energy | ~298,000 |
 
 ## Advantage over Pure SCAN
@@ -140,10 +140,10 @@ A* Dispatch (point-to-point) assigns one lift per floor per tick. A*+Scan sweeps
 | 2026-05-05 | Still ~65s avg wait | Found: when `d=0` after exhausting direction, A* re-scored correctly but if scored direction == same extreme, lift stayed idle. Fixed: now explicitly checks if scored direction has reachable work |
 
 ## When A*+Scan Is Optimal
-- ✅ **Mixed traffic patterns** (some directional, some scattered)
-- ✅ **High-load periods** (efficiency needed)
-- ✅ **Fairness is important** (urgency prevents starvation)
-- ✅ **General-purpose** (works well in all scenarios)
+- Mixed traffic patterns (some directional, some scattered)
+- High-load periods (efficiency needed)
+- Fairness is important (urgency prevents starvation)
+- General-purpose (works well in all scenarios)
 
 ## Recommendations
 - **Use A*+Scan as default** for standard commercial buildings

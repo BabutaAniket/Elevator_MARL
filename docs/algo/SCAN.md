@@ -1,6 +1,6 @@
 # SCAN (Directional Collective Control)
 
-**Type**: Deterministic Heuristic | **Implementation**: `ScanController` | **Status**: Working ✅
+**Type**: Deterministic Heuristic | **Implementation**: `ScanController` | **Status**: Working
 
 ## Overview
 SCAN is the standard algorithm used in 99% of elevators worldwide. It operates purely on mechanical kinematics without calculating wait time or urgency. The elevator sweeps in one direction until answering the highest call, then reverses direction and sweeps the opposite way.
@@ -52,20 +52,20 @@ This prevents the "mid-shaft U-turn" problem where the algorithm naively tries t
 - Stops are determined purely by floor number, not by wait time or urgency
 
 ## Accuracy to Academic Definition
-✅ **True to Name**: Yes. This implementation perfectly mirrors **Directional Collective Control (SCAN)**, the industry standard for mechanical elevators.
+True to Name: Yes. This implementation perfectly mirrors **Directional Collective Control (SCAN)**, the industry standard for mechanical elevators.
 
 ## Strengths
-- ✅ **Deterministic and predictable** — No randomness; easy to verify correctness
-- ✅ **Mechanically optimal** — Minimizes reversal overhead
-- ✅ **No stutter loops** — Direction-aware boarding prevents infinite loops
-- ✅ **Fair distribution** — All floors get served in a predictable cycle
-- ✅ **Low computational overhead** — O(n) per tick
+- Deterministic and predictable: No randomness; easy to verify correctness
+- Mechanically optimal: Minimizes reversal overhead
+- No stutter loops: Direction-aware boarding prevents infinite loops
+- Fair distribution: All floors get served in a predictable cycle
+- Low computational overhead: O(n) per tick
 
 ## Weaknesses
-- ❌ **No urgency-awareness** — An ancient call at Floor 22 is treated the same as a fresh call
-- ❌ **Poor multi-directional performance** — Struggles during lunch rush when demand is scattered
-- ❌ **Excessive wait times for distant floors** — During high-load periods
-- ❌ **No load-balancing** — All 8 lifts can sweep in the same direction simultaneously
+- No urgency-awareness: An ancient call at Floor 22 is treated the same as a fresh call
+- Poor multi-directional performance: Struggles during lunch rush when demand is scattered
+- Excessive wait times for distant floors: During high-load periods
+- No load-balancing: All 8 lifts can sweep in the same direction simultaneously
 
 ## Performance Characteristics
 - **Mean Wait Time**: 40–60 seconds (fair but not optimal)
@@ -84,16 +84,16 @@ This prevents the "mid-shaft U-turn" problem where the algorithm naively tries t
 | Metric | Value |
 |--------|-------|
 | Delivered | ~12,590 |
-| Mean avg wait | **~4.4 s** ✅ |
+| Mean avg wait | ~4.4 s |
 | Peak max wait | ~107–127 s |
 | Peak waiting | ~42–49 |
 | Energy | ~298,000 |
 
 ## When SCAN Is Optimal
-- ✅ Morning/Evening rush hours (directional demand)
-- ✅ Low-load scenarios (simple, efficient)
-- ✅ Predictable, uniform traffic patterns
-- ✅ When energy efficiency is secondary to fairness
+- Morning/Evening rush hours (directional demand)
+- Low-load scenarios (simple, efficient)
+- Predictable, uniform traffic patterns
+- When energy efficiency is secondary to fairness
 
 ## Conclusion
 SCAN is the industry workhorse because it is simple, predictable, and mechanically sound. However, it lacks cognitive awareness and performs poorly during extreme multi-directional traffic conditions. It serves as the baseline against which all other algorithms are measured.

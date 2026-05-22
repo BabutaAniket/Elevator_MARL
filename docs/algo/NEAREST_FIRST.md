@@ -1,6 +1,6 @@
 # Nearest First (Greedy Search)
 
-**Type**: Greedy Heuristic | **Implementation**: `NearestFirstController` | **Status**: Broken ❌
+**Type**: Greedy Heuristic | **Implementation**: `NearestFirstController` | **Status**: Broken
 
 ## Overview
 Nearest First is a pure greedy algorithm that assigns each idle elevator to the physically closest waiting passenger. While intuitive, it is rarely used in real elevators because it causes catastrophic starvation of distant floors.
@@ -45,25 +45,25 @@ In your implementation, there is a deconfliction mechanism that counts how many 
 - No weighting, no urgency factor, no direction awareness
 
 ## Accuracy to Academic Definition
-✅ **True to Name**: Yes. It is a pure **Greedy Search** algorithm. Every decision is locally optimal but globally suboptimal.
+True to Name: Yes. It is a pure **Greedy Search** algorithm. Every decision is locally optimal but globally suboptimal.
 
 ## Strengths
-- ✅ Simple to implement
-- ✅ Deterministic
-- ✅ Low computational overhead
-- ✅ Easy to debug
+- Simple to implement
+- Deterministic
+- Low computational overhead
+- Easy to debug
 
 ## Weaknesses
-- ❌ **Catastrophic starvation** — Distant floors wait indefinitely
-- ❌ **Thrashing** — Multiple lifts race to the same close floor
-- ❌ **No momentum** — Lifts abandon current routes mid-sweep
-- ❌ **Unfair** — Repeatedly pressing buttons traps the nearest elevator
-- ❌ **No direction awareness** — Causes stutter loops and boarding rejections
+- Catastrophic starvation: Distant floors wait indefinitely
+- Thrashing: Multiple lifts race to the same close floor
+- No momentum: Lifts abandon current routes mid-sweep
+- Unfair: Repeatedly pressing buttons traps the nearest elevator
+- No direction awareness: Causes stutter loops and boarding rejections
 
 ## Performance Characteristics
 - **Mean Wait Time**: ~34 seconds (deceptively good average)
-- **Peak Wait Time**: **320+ seconds** ❌ (catastrophic outliers)
-- **Peak Concurrent Waiting**: **200+ passengers** ❌ (massive queues form)
+- **Peak Wait Time**: 320+ seconds (catastrophic outliers)
+- **Peak Concurrent Waiting**: 200+ passengers (massive queues form)
 - **Energy Efficiency**: Poor (thrashing waste)
 - **Fairness Index**: Extremely low (distant floors starved)
 
@@ -73,8 +73,8 @@ In your implementation, there is a deconfliction mechanism that counts how many 
 |--------|-------|
 | Delivered | ~8,100 |
 | Mean avg wait | ~34 s |
-| Peak max wait | **~320+ s** ❌ |
-| Peak waiting | **~200+** ❌ |
+| Peak max wait | ~320+ s |
+| Peak waiting | ~200+ |
 | Energy | ~295,000 |
 
 ## Why It Fails So Catastrophically
@@ -85,8 +85,8 @@ In your implementation, there is a deconfliction mechanism that counts how many 
 4. **Deconfliction Insufficient**: Even with demand-based deconfliction, a highly concentrated demand at a nearby floor will still starve distant floors.
 
 ## When Nearest First Might Work
-- ✅ Only in scenarios with uniform, predictable demand across all floors
-- ✅ Never in realistic multi-floor buildings with directional rush hours
+- Only in scenarios with uniform, predictable demand across all floors
+- Never in realistic multi-floor buildings with directional rush hours
 
 ## Conclusion
 

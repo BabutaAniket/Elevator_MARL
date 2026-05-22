@@ -11,7 +11,7 @@ This directory contains comprehensive documentation for all elevator dispatching
 ### [SCAN (Directional Collective Control)](SCAN.md)
 - **Type**: Mechanical sweeping algorithm
 - **Complexity**: O(n) per tick
-- **Status**: ✅ Production-ready
+- **Status**: Production-ready
 - **Best for**: Directional traffic (morning/evening rush)
 - **Mean wait**: ~4–8 seconds
 - **Key insight**: Industry standard for 99% of elevators worldwide
@@ -19,8 +19,8 @@ This directory contains comprehensive documentation for all elevator dispatching
 ### [Nearest First (Greedy Search)](NEAREST_FIRST.md)
 - **Type**: Naive greedy assignment
 - **Complexity**: O(n²) per tick
-- **Status**: ❌ Broken (included as negative example)
-- **Mean wait**: ~34 seconds (average) but **320+ seconds** (outliers)
+- **Status**: Broken (included as negative example)
+- **Mean wait**: ~34 seconds (average) but 320+ seconds (outliers)
 - **Key insight**: Local optimization leads to global catastrophe (starvation)
 
 ---
@@ -30,17 +30,17 @@ This directory contains comprehensive documentation for all elevator dispatching
 ### [A* Dispatch (Cost-Minimization)](ASTAR.md)
 - **Type**: Urgency-weighted assignment
 - **Complexity**: O(n²) per tick
-- **Status**: ⚠️ Functional but suboptimal
+- **Status**: Functional but suboptimal
 - **Best for**: Light-load scenarios, scattered demand
-- **Mean wait**: ~65–70 seconds ❌
+- **Mean wait**: ~65–70 seconds
 - **Key insight**: Point-to-point assignment sacrifices throughput for responsiveness
 
 ### [A* + SCAN Hybrid](ASTAR_SCAN.md)
 - **Type**: Hybrid cognitive + mechanical
 - **Complexity**: O(n²) per tick
-- **Status**: ✅ Recommended for most buildings
+- **Status**: Recommended for most buildings
 - **Best for**: Mixed traffic patterns, 24-hour buildings
-- **Mean wait**: ~4–8 seconds ✅
+- **Mean wait**: ~4–8 seconds
 - **Key insight**: Combines A*'s urgency-awareness with SCAN's sweep efficiency
 
 ---
@@ -50,11 +50,11 @@ This directory contains comprehensive documentation for all elevator dispatching
 ### [Pure RL (CMA-ES / PPO)](CMAES.md)
 - **Type**: Neural network policy learning
 - **Complexity**: O(1) per tick (inference only)
-- **Status**: ⚠️ Requires training
+- **Status**: Requires training
 - **Best for**: Research, discovering novel strategies
-- **Training cost**: 20–50 generations (~4–10 full runs)
-- **Mean wait (untrained)**: 12,007 seconds ❌
-- **Mean wait (trained)**: ~2–4 seconds ✅✅
+- **Training cost**: 20–50 generations (4–10 full runs)
+- **Mean wait (untrained)**: 12,007 seconds
+- **Mean wait (trained)**: ~2–4 seconds
 - **Key insight**: Black-box learning exceeds heuristics, but interpretability and safety are concerns
 
 ---
@@ -64,10 +64,10 @@ This directory contains comprehensive documentation for all elevator dispatching
 ### [Meta-Controller (Final Solution)](META_CONTROLLER.md)
 - **Type**: Neural supervisor + deterministic executors
 - **Complexity**: O(1) meta-decision + O(n) execution
-- **Status**: 🔬 Research prototype
+- **Status**: Research prototype
 - **Best for**: Production deployment with fairness + throughput requirements
-- **Training cost**: 10–20 generations (~2–4 full runs)
-- **Mean wait**: ~3–5 seconds ✅✅
+- **Training cost**: 10–20 generations (2–4 full runs)
+- **Mean wait**: ~3–5 seconds
 - **Key insight**: Learns which proven algorithm to use at each moment (Pareto optimality)
 
 ---
@@ -76,14 +76,14 @@ This directory contains comprehensive documentation for all elevator dispatching
 
 | Metric | SCAN | A*+Scan | Pure RL | Meta-Controller |
 |--------|------|---------|---------|-----------------|
-| **Mean wait** | 4–8s | 4–8s | 2–4s | **3–5s** |
-| **Peak wait** | 120–180s | 90–120s | 40–70s | **40–60s** |
-| **Training** | None | None | 50+ gens | **20 gens** |
-| **Interpretable** | Yes | Yes | No | **Yes** |
-| **Safe** | Yes | Yes | No | **Yes** |
-| **Fairness** | High | High | Variable | **High** |
-| **Throughput** | High | High | High | **High** |
-| **Production-ready** | Yes | Yes | No | **Yes** |
+| **Mean wait** | 4–8s | 4–8s | 2–4s | 3–5s |
+| **Peak wait** | 120–180s | 90–120s | 40–70s | 40–60s |
+| **Training** | None | None | 50+ gens | 20 gens |
+| **Interpretable** | Yes | Yes | No | Yes |
+| **Safe** | Yes | Yes | No | Yes |
+| **Fairness** | High | High | Variable | High |
+| **Throughput** | High | High | High | High |
+| **Production-ready** | Yes | Yes | No | Yes |
 
 ---
 
@@ -148,30 +148,30 @@ Is the building experiencing rush hour?
 - Mean wait: 40–60 seconds
 
 ### Phase 2: Greedy Improvement Attempt (Nearest First)
-- ❌ Catastrophic failure
-- Taught us: Local optimization ≠ global optimization
+- Catastrophic failure
+- Taught us: Local optimization does not equal global optimization
 
 ### Phase 3: Cognitive Targeting (A*)
-- ✅ Urgency-aware assignment
-- ⚠️ Poor throughput during rush hours
+- Urgency-aware assignment
+- Poor throughput during rush hours
 - Mean wait: 65–70 seconds
 
 ### Phase 4: Hybrid Approach (A*+Scan)
-- ✅ Best practical algorithm for most buildings
+- Best practical algorithm for most buildings
 - Combines SCAN's efficiency with A*'s fairness
-- Mean wait: 4–8 seconds ✅
+- Mean wait: 4–8 seconds
 
 ### Phase 5: Pure Learning (CMA-ES / PPO)
-- ✅ Exceeds all heuristics when trained
-- ❌ Black-box problem, regulatory risk
+- Exceeds all heuristics when trained
+- Black-box problem, regulatory risk
 - Mean wait (trained): 2–4 seconds
 
 ### Phase 6: Neuro-Symbolic Hybrid (Meta-Controller)
-- ✅✅ Best-in-class performance
-- ✅ Interpretable and safe
-- ✅ Converges quickly (only 20 generations)
-- Mean wait: 3–5 seconds ✅✅
-- **Recommended for production**
+- Best-in-class performance
+- Interpretable and safe
+- Converges quickly (only 20 generations)
+- Mean wait: 3–5 seconds
+- Recommended for production
 
 ---
 

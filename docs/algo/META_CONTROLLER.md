@@ -1,6 +1,6 @@
 # Hierarchical Meta-Controller (Final Solution)
 
-**Type**: Neuro-Symbolic Hybrid | **Implementation**: `MetaCMAESController` | **Status**: Research prototype 🔬
+**Type**: Neuro-Symbolic Hybrid | **Implementation**: `MetaCMAESController` | **Status**: Research prototype
 
 ## Overview
 
@@ -114,52 +114,52 @@ The network does **not** use explicit rules like "if waiting > 200, switch to SC
 These implicit features allow the network to predict saturation **before** it happens and switch proactively.
 
 ## Accuracy to Academic Definition
-✅ **True to Name**: Yes. This is an authentic implementation of **Hierarchical Reinforcement Learning (HRL)** with explicit **Neuro-Symbolic** architecture.
+True to Name: Yes. This is an authentic implementation of **Hierarchical Reinforcement Learning (HRL)** with explicit **Neuro-Symbolic** architecture.
 
 The "neuro" part: CMA-ES network for strategic decision-making.
 The "symbolic" part: Hardcoded algorithms for tactical execution.
 
 ## Strengths
-- ✅ **Seamless Pareto optimality** — Achieves best-of-both-worlds across all scenarios
-- ✅ **Interpretable** — Know which policy is running at any moment
-- ✅ **Provably safe** — Never executes unknown behavior (both sub-policies are proven safe)
-- ✅ **Fast convergence** — Learning only 144 parameters (vs 576 for full DQN)
-- ✅ **Explainable** — Can analyze which state features drive policy switching
-- ✅ **Low computational cost** — Single scalar output per tick
+- Seamless Pareto optimality: Achieves best-of-both-worlds across all scenarios
+- Interpretable: Know which policy is running at any moment
+- Provably safe: Never executes unknown behavior (both sub-policies are proven safe)
+- Fast convergence: Learning only 144 parameters (vs 576 for full DQN)
+- Explainable: Can analyze which state features drive policy switching
+- Low computational cost: Single scalar output per tick
 
 ## Weaknesses
-- ⚠️ **Still requires training** — 10–20 generations (~2–4 runs)
-- ⚠️ **Sub-policies are fixed** — Cannot discover entirely new strategies
-- ⚠️ **Boundary cases** — Network might oscillate around mode_signal = 0.0
+- Still requires training: 10–20 generations (2–4 runs)
+- Sub-policies are fixed: Cannot discover entirely new strategies
+- Boundary cases: Network might oscillate around mode_signal = 0.0
 
 ## Performance Characteristics
 
 ### Expected Performance
-- **Mean Wait Time**: ~3–5 seconds ✅✅ (near-optimal)
-- **Peak Wait Time**: ~40–60 seconds ✅✅ (exceptional)
-- **Peak Concurrent Waiting**: ~15–25 passengers ✅✅ (healthy)
-- **Energy Efficiency**: ~280,000–300,000 ✅ (equivalent to SCAN)
+- **Mean Wait Time**: ~3–5 seconds (near-optimal)
+- **Peak Wait Time**: ~40–60 seconds (exceptional)
+- **Peak Concurrent Waiting**: ~15–25 passengers (healthy)
+- **Energy Efficiency**: ~280,000–300,000 (equivalent to SCAN)
 
 ### Performance Across Traffic Regimes
 
 | Scenario | SCAN | A*+Dispatch | Meta-Controller |
 |----------|------|-------------|-----------------|
-| **Quiet (midnight)** | Good | Excellent | **Excellent** |
-| **Light load** | Excellent | Excellent | **Excellent** |
-| **Mixed traffic** | Good | Good | **Excellent** |
-| **Morning rush** | Excellent | Poor | **Excellent** |
-| **Lunch chaos** | Good | Good | **Excellent** |
-| **Evening rush** | Excellent | Poor | **Excellent** |
-| **Overall average** | Very good | Mixed | **Best-in-class** |
+| **Quiet (midnight)** | Good | Excellent | Excellent |
+| **Light load** | Excellent | Excellent | Excellent |
+| **Mixed traffic** | Good | Good | Excellent |
+| **Morning rush** | Excellent | Poor | Excellent |
+| **Lunch chaos** | Good | Good | Excellent |
+| **Evening rush** | Excellent | Poor | Excellent |
+| **Overall average** | Very good | Mixed | Best-in-class |
 
 ### Results (Trained Meta-Controller, after 20 generations)
 
 | Metric | Value |
 |--------|-------|
 | Delivered | ~12,800+ |
-| Mean avg wait | **~3–5 s** ✅✅ |
-| Peak max wait | **~40–60 s** ✅✅ |
-| Peak waiting | **~15–25** ✅✅ |
+| Mean avg wait | ~3–5 s |
+| Peak max wait | ~40–60 s |
+| Peak waiting | ~15–25 |
 | Energy | ~298,000 |
 
 ## The Fairness Paradox (Solved)
@@ -214,11 +214,11 @@ The network learns the **precise switching moment** based on:
 Because the meta-network only learns to pick between **two proven-good strategies**, training is much faster than learning a policy from scratch. The network is not discovering new physics; it is learning when to apply which proven method.
 
 ## When Meta-Controller Is Optimal
-- ✅ **Production deployment** (needs to handle all traffic regimes)
-- ✅ **24-hour buildings** (traffic changes throughout day)
-- ✅ **Mixed traffic patterns** (multidirectional demand)
-- ✅ **When fairness AND throughput matter** (most real buildings)
-- ✅ **When regulatory approval is required** (only safe, proven algorithms execute)
+- Production deployment (needs to handle all traffic regimes)
+- 24-hour buildings (traffic changes throughout day)
+- Mixed traffic patterns (multidirectional demand)
+- When fairness AND throughput matter (most real buildings)
+- When regulatory approval is required (only safe, proven algorithms execute)
 
 ## Comparison: All Approaches
 
