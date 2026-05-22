@@ -71,7 +71,7 @@ By shifting the weights of the multi-objective reward function, the CMA-ES agent
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/lift-rl-simulator.git
+git clone https://github.com/BabutaAniket/Elevator_MARL
 cd lift-rl-simulator
 ```
 
@@ -95,6 +95,24 @@ python app.py
 ```
 
 5. Open your browser and navigate to `http://localhost:5000`.
+
+---
+
+## Visualization & Demo
+
+### Live Simulation
+Watch the elevator system in action with real-time floor visualization, passenger queues, and performance metrics:
+
+![Simulation Demo](static/gif/simulation.gif)
+
+*Real-time elevator dispatching with floor-by-floor visualization. Shows lift positions, passenger loads, hallway queues, and live KPI metrics (wait times, delivery throughput, energy consumption).*
+
+### Auto-Training Mode
+Automated training loop that runs sequential simulations and iteratively improves the policy:
+
+![Auto-Train Session](static/gif/autotrain-simulation.gif)
+
+*Batch training interface showing sequential runs with automatic weight updates. The system trains multiple episodes back-to-back and reloads weights for continuous improvement, enabling efficient policy evolution.*
 
 ---
 
