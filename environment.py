@@ -111,7 +111,6 @@ class LiftBank:
         self.lifts = [Lift(name=n, bank=bank_id) for n in lift_names]
         self.accessible_floors = BANK_A_FLOOR_INDICES if bank_id == 'A' else BANK_B_FLOOR_INDICES
 
-
         self.hall_calls: Dict[int, List[Passenger]] = {f: [] for f in range(NUM_FLOORS)}
         self.recent_waits: deque = deque(maxlen=ROLLING_WINDOW_TICKS)
 
@@ -163,7 +162,6 @@ class BuildingEnvironment:
         self.total_energy = 0.0
         self.emergency_mode = False
 
-
         self.tick_pickups = 0
         self.tick_deliveries = 0
         self.tick_pickups_a = 0
@@ -193,7 +191,6 @@ class BuildingEnvironment:
         )
         self.passenger_counter += 1
 
-
         bank = self._assign_bank(origin, destination)
         if bank is None:
             return None
@@ -212,7 +209,6 @@ class BuildingEnvironment:
         b_can = (origin in BANK_B_FLOOR_INDICES and destination in BANK_B_FLOOR_INDICES)
 
         if a_can and b_can:
-
             if self.bank_a.get_total_waiting() <= self.bank_b.get_total_waiting():
                 return self.bank_a
             return self.bank_b
@@ -344,6 +340,21 @@ class BuildingEnvironment:
             if pickable:
                 safe[i] = int(LiftAction.STOP_OPEN)
 
+        # ─────────────────────────────────────────────────────────────────
+        # LOBBY HOMING (Morning Rush Pre-positioning)
+        # Assuming an 8:00 AM start, 8:30 AM to 10:30 AM is tick 1800 to 9000.
+        # ─────────────────────────────────────────────────────────────────
+        if 1800 <= self.tick <= 9000:
+            for i, lift in enumerate(bank.lifts):
+                # If the lift is completely empty, has no targets, and the AI told it to IDLE
+                if lift.state == LiftState.IDLE and lift.load == 0 and not lift.destinations:
+                    if LiftAction(safe[i]) == LiftAction.IDLE:
+                        target_floor = 8  # Floor 'G' (Ground Lobby)
+                        if lift.floor > target_floor:
+                            safe[i] = int(LiftAction.MOVE_DOWN)
+                        elif lift.floor < target_floor:
+                            safe[i] = int(LiftAction.MOVE_UP)
+
         if self.urgency_dispatch_enabled:
             urgent_floors = set()
             for f, plist in bank.hall_calls.items():
@@ -390,7 +401,6 @@ class BuildingEnvironment:
             if lift.door_timer <= 0:
                 lift.state = LiftState.IDLE
             return
-
 
         if lift.state == LiftState.DECELERATING:
             lift.decel_timer -= 1
@@ -529,10 +539,10 @@ class BuildingEnvironment:
                - W_ENG * Energy
                - 5 * ln(1 + wait_avg / 10)    [when passengers queue]
                - 5 * ln(1 + inside_avg / 10)  [when passengers ride]
-               - starvation_penalty            [linear bleed if any wait > 300 s]
+               - starvation_penalty            [linear bleed if any wait > 120 s]
 
         The starvation guardrail overrides the flat log curve when a single
-        passenger has been waiting more than 5 minutes, forcing the agent to
+        passenger has been waiting more than 2 minutes, forcing the agent to
         service neglected floors rather than optimising the average.
         """
         W_DEL = 1.0
@@ -568,10 +578,10 @@ class BuildingEnvironment:
 
         # ─────────────────────────────────────────────────────────────────
         # STARVATION GUARDRAIL: linear penalty kicks in when any passenger
-        # has waited more than 5 minutes (300 s), overriding the flat log
+        # has waited more than 2 minutes (120 s), overriding the flat log
         # curve and forcing the agent to service neglected floors.
         # ─────────────────────────────────────────────────────────────────
-        starvation_penalty = (max_wait - 300) / 50.0 if max_wait > 300 else 0.0
+        starvation_penalty = (max_wait - 120) / 50.0 if max_wait > 120 else 0.0
 
         reward = (W_DEL * deliveries
                   - W_ENG * tick_energy
@@ -601,10 +611,10 @@ class BuildingEnvironment:
             max_wait = bank.get_max_wait(f, self.tick)
             state.append(math.log1p(up_count) / 5.0)
             state.append(math.log1p(down_count) / 5.0)
-            state.append(min(max_wait / 300.0, 1.0))
+            state.append(min(max_wait / 120.0, 1.0))
 
         for f in range(NUM_FLOORS):
-            state.append(min(bank.get_max_wait(f, self.tick) / 300.0, 1.0))
+            state.append(min(bank.get_max_wait(f, self.tick) / 120.0, 1.0))
 
         sim_time = self.tick % 86400
         hour = sim_time / 3600.0

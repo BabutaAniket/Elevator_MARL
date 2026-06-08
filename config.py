@@ -42,8 +42,8 @@ BANK_A_LIFT_NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 BANK_B_LIFT_NAMES = ['I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
 
 NUM_LIFTS_PER_BANK = 8
-MAX_CAPACITY = 15
-SAFE_CAPACITY = 13
+MAX_CAPACITY = 20
+SAFE_CAPACITY = 18
 
 
 DOOR_OPEN_AVG = 10

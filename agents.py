@@ -396,7 +396,7 @@ class NearestFirstController:
                 if wcount <= 0:
                     continue
                 assigned = floor_assignments.get(f, 0)
-                lifts_needed = max(1, (wcount + 14) // 15)
+                lifts_needed = max(1, (wcount + 19) // 20)
                 if assigned >= lifts_needed:
                     continue
                 d = abs(f - lift.floor)
@@ -1028,7 +1028,7 @@ class CMAESController:
         features = np.array([
             total_waiting / 50.0,
             avg_floor / NUM_FLOORS,
-            total_load / (NUM_LIFTS_PER_BANK * 15),
+            total_load / (NUM_LIFTS_PER_BANK * 20),
             idle_count / NUM_LIFTS_PER_BANK,
             moving_up / NUM_LIFTS_PER_BANK,
             moving_down / NUM_LIFTS_PER_BANK,
@@ -1173,7 +1173,7 @@ class RoundRobinController:
             if not idle_lifts:
                 break
             assigned_here = sum(1 for t in self._targets.values() if t == floor)
-            needed = max(1, (count + 14) // 15) - assigned_here
+            needed = max(1, (count + 19) // 20) - assigned_here
             for _ in range(max(0, needed)):
                 if not idle_lifts:
                     break
