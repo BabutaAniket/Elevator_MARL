@@ -98,6 +98,12 @@ cython_debug/
 .idea/
 *.iml
 
+# Mini CI/CD pipeline runtime artifacts (regenerated on every run)
+mini_cicd/logs/
+mini_cicd/state/
+mini_cicd/history/
+mini_cicd/*.venv/
+
 # OS files
 .DS_Store
 Thumbs.db
