@@ -60,7 +60,7 @@ stages:
     command: >
       python -m coverage run --source=. -m pytest test_sim.py mini_cicd/test_dashboard.py &&
       python -m coverage report -m &&
-      python -m coverage html -d coverage_html
+      python -m coverage html -d ../coverage_html
     continue_on_failure: false
     timeout_seconds: 600
 

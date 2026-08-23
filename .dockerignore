@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.coverage
+coverage_html
+.idea
+.vscode
+mini_cicd/logs
+mini_cicd/history
+mini_cicd/state
+*.db

@@ -1,4 +1,40 @@
-# Multi-Agent Reinforcement Learning (MARL) for Elevator Dispatching
+# Elevator MARL CI/CD
+
+A project-agnostic, fully local CI/CD pipeline for the Elevator MARL simulator.
+It watches Git commits, builds an isolated checkout, runs tests, linting and
+coverage, packages the application with Docker, stores SQLite build history,
+and exposes a local web dashboard for run evidence and stage logs.
+
+**Repository name:** `elevator-marl-ci-cd`
+**Repository description:** Local CI/CD pipeline with Git watching, isolated
+builds, testing, coverage, Docker packaging, SQLite history, and a web
+dashboard.
+
+## CI/CD Pipeline
+
+The primary deliverable is in [`mini_cicd/`](mini_cicd/). It is driven by
+[`mini_cicd/pipeline.yml`](mini_cicd/pipeline.yml), so another project can be
+adopted by changing stage commands and repository settings without rewriting
+the pipeline engine.
+
+```text
+New commit -> isolated Git worktree -> build -> tests -> lint -> coverage -> Docker image -> logs and SQLite history
+```
+
+### Run Locally
+
+```powershell
+cd mini_cicd
+python -m pip install -r requirements.txt
+python orchestrator.py run
+python dashboard.py
+```
+
+Open `http://127.0.0.1:5050` to view recent runs, stage statuses, Docker image
+tags, and linked logs. See [`mini_cicd/README.md`](mini_cicd/README.md) for
+commit watching, failure demonstrations, configuration, and dashboard details.
+
+## Elevator MARL Target Application
 
 ## Abstract
 
@@ -71,8 +107,8 @@ By shifting the weights of the multi-objective reward function, the CMA-ES agent
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/BabutaAniket/Elevator_MARL
-cd lift-rl-simulator
+git clone https://github.com/BabutaAniket/elevator-marl-ci-cd.git
+cd elevator-marl-ci-cd
 ```
 
 2. Create and activate a virtual environment:
@@ -95,6 +131,25 @@ python app.py
 ```
 
 5. Open your browser and navigate to `http://localhost:5000`.
+
+### Docker
+
+Build and publish the Flask port to the host:
+
+```bash
+docker build -t elevator-marl .
+docker run --rm -p 5000:5000 elevator-marl
+```
+
+Open `http://localhost:5000`. `EXPOSE 5000` in the Dockerfile documents the
+container port but does not publish it; the `-p 5000:5000` option is required.
+The image uses the CPU-only PyTorch wheel by default to avoid downloading CUDA
+runtime packages. Supply another PyTorch wheel index only when GPU support is
+required:
+
+```bash
+docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 -t elevator-marl .
+```
 
 ---
 
