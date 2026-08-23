@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""
-orchestrator.py -- Mini CI/CD Pipeline Engine
-================================================
-A fully local, project-agnostic CI/CD orchestrator. All project-specific
-knowledge lives in pipeline.yml; this engine only knows how to:
-
-  1. Resolve the target commit in the target git repository.
-  2. Check out that commit into an *isolated* workspace (git worktree).
-  3. Run each configured stage as a subprocess, capturing timestamped logs.
-  4. Stop downstream stages on failure (unless continue_on_failure: true).
-  5. Build & tag a Docker image (if a docker-type stage is configured).
-  6. Persist immutable, idempotent build-history records to SQLite.
-
-Usage:
-    python orchestrator.py run [--config pipeline.yml] [--sha <commit_sha>]
-    python orchestrator.py history [--limit 20]
-    python orchestrator.py show <run_id>
-"""
 import argparse
 import json
 import os
@@ -36,10 +18,6 @@ except ImportError:
     sys.exit(1)
 
 
-# --------------------------------------------------------------------------- #
-# Utilities
-# --------------------------------------------------------------------------- #
-
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -49,12 +27,7 @@ def utc_now_stamp() -> str:
 
 
 class PipelineError(RuntimeError):
-    """Raised for fatal, non-stage-related pipeline errors (bad config, git errors)."""
-
-
-# --------------------------------------------------------------------------- #
-# Configuration
-# --------------------------------------------------------------------------- #
+    pass
 
 class Config:
     def __init__(self, config_path: Path):
@@ -83,10 +56,6 @@ class Config:
         if not self.repo_path.exists():
             raise PipelineError(f"repo_path does not exist: {self.repo_path}")
 
-
-# --------------------------------------------------------------------------- #
-# Build history persistence (SQLite)
-# --------------------------------------------------------------------------- #
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -117,18 +86,6 @@ CREATE TABLE IF NOT EXISTS stage_results (
 
 
 class BuildHistory:
-    """
-    Idempotent, append-only build history store.
-
-    Idempotency guarantee: every pipeline execution gets a unique run_id
-    (derived from commit SHA + timestamp + short uuid), so re-running the
-    pipeline for the *same* commit simply appends a new run row rather than
-    overwriting or corrupting any prior run's history. Stage rows use
-    INSERT OR REPLACE keyed on (run_id, stage_name), so re-processing the
-    same run_id (e.g. a crash-recovery re-log) safely upserts instead of
-    duplicating rows.
-    """
-
     def __init__(self, db_path: Path):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
@@ -181,10 +138,6 @@ class BuildHistory:
         return run, stages
 
 
-# --------------------------------------------------------------------------- #
-# Git helpers
-# --------------------------------------------------------------------------- #
-
 def git(*args, cwd):
     result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -199,7 +152,6 @@ def resolve_commit_sha(repo_path: Path, branch: str, requested_sha: str = None) 
 
 
 def create_isolated_worktree(repo_path: Path, commit_sha: str, dest: Path) -> Path:
-    """Checks out `commit_sha` into a brand-new, isolated worktree directory."""
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -217,10 +169,6 @@ def remove_worktree(repo_path: Path, dest: Path):
         except PipelineError:
             pass
 
-
-# --------------------------------------------------------------------------- #
-# Stage execution
-# --------------------------------------------------------------------------- #
 
 def run_shell_stage(stage, cwd: Path, log_path: Path, timeout: int):
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -260,7 +208,6 @@ def run_docker_stage(stage, cwd: Path, log_path: Path, commit_sha: str, timeout:
         log.write(f"cwd: {cwd}\nimage: {tag}\ndockerfile: {dockerfile}\n\n")
         log.flush()
 
-        # Basic daemon-availability check so failures are diagnosed cleanly.
         try:
             ping = subprocess.run(["docker", "info"], capture_output=True, text=True)
             daemon_ok = ping.returncode == 0
@@ -299,10 +246,6 @@ def run_docker_stage(stage, cwd: Path, log_path: Path, commit_sha: str, timeout:
         log.write(f"\n=== STAGE '{stage['name']}' END {finished} status={status} exit_code={exit_code} ===\n")
     return status, exit_code, started, finished
 
-
-# --------------------------------------------------------------------------- #
-# Pipeline runner
-# --------------------------------------------------------------------------- #
 
 def run_pipeline(config: Config, requested_sha: str = None) -> int:
     commit_sha = resolve_commit_sha(config.repo_path, config.branch, requested_sha)
@@ -343,7 +286,7 @@ def run_pipeline(config: Config, requested_sha: str = None) -> int:
     except PipelineError as exc:
         overall_status = "error"
         print(f"[orchestrator] FATAL: {exc}", file=sys.stderr)
-    except Exception as exc:  # defense in depth: never leave a run's status unrecorded
+    except Exception as exc:
         overall_status = "error"
         print(f"[orchestrator] UNEXPECTED ERROR: {exc}", file=sys.stderr)
     finally:
@@ -353,10 +296,6 @@ def run_pipeline(config: Config, requested_sha: str = None) -> int:
     print(f"[orchestrator] run {run_id} finished with status={overall_status}")
     return 0 if overall_status == "passed" else 1
 
-
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 
 def cmd_run(args):
     config = Config(Path(args.config))

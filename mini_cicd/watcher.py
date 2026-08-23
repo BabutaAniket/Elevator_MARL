@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-watcher.py -- Polling-based Commit Watcher
-===========================================
-Polls the target git repository (declared in pipeline.yml) for new commits
-on the watched branch. When a new commit SHA is detected, it triggers
-orchestrator.py to run the full pipeline for that commit.
-
-State (the last-seen commit SHA) is persisted to a small JSON file so the
-watcher can be restarted without re-triggering an already-processed commit.
-
-Usage:
-    python watcher.py [--config pipeline.yml] [--once]
-"""
 import argparse
 import json
 import subprocess
@@ -34,8 +21,6 @@ def save_state(state_file: Path, state: dict):
 
 
 def poll_once(config: Config) -> bool:
-    """Checks for a new commit and triggers the pipeline if found. Returns True if triggered."""
-    # Fetch remote updates if a remote exists; ignore failures for local-only repos.
     subprocess.run(["git", "fetch", "--all", "--quiet"], cwd=config.repo_path, capture_output=True)
 
     latest_sha = resolve_commit_sha(config.repo_path, config.branch)
@@ -50,8 +35,6 @@ def poll_once(config: Config) -> bool:
         [sys.executable, str(Path(__file__).parent / "orchestrator.py"),
          "--config", str(config.config_path), "run", "--sha", latest_sha],
     )
-    # Only advance the watermark after the pipeline has actually run (success or failure),
-    # so a crashed watcher never silently skips a commit.
     state["last_sha"] = latest_sha
     save_state(config.state_file, state)
     print(f"[watcher] pipeline exited with code {result.returncode}")
@@ -75,7 +58,7 @@ def main():
     while True:
         try:
             poll_once(config)
-        except Exception as exc:  # keep the watcher alive across transient errors
+        except Exception as exc:
             print(f"[watcher] error during poll: {exc}", file=sys.stderr)
         time.sleep(config.poll_interval)
 

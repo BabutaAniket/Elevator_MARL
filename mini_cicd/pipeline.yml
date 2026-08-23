@@ -1,33 +1,16 @@
-# =============================================================================
-# pipeline.yml
-# Declarative configuration for the Mini CI/CD Pipeline.
-# The orchestrator (orchestrator.py) is 100% project-agnostic: it only knows
-# how to read this file and execute shell commands. All project-specific
-# knowledge (paths, commands, image names) lives here.
-# =============================================================================
-
 project:
   name: "elevator-marl"
-  # Absolute or relative (to this file) path to the target git repository.
-  # mini_cicd lives inside the Elevator_MARL repo itself, so the repo root is one level up.
   repo_path: ".."
-  # Branch the commit watcher polls for new commits.
   branch: "main"
 
-# Where the watcher stores the last-seen commit SHA (for polling state).
 watcher:
   poll_interval_seconds: 10
   state_file: "state/watcher_state.json"
 
-# Global settings for build history / logging.
 history:
   db_path: "history/build_history.db"
   logs_dir: "logs"
 
-# Each stage runs sequentially, in a clean git-worktree checkout of the
-# target repo, in the order declared below. `working_dir` is relative to
-# the root of that isolated checkout. If a stage fails and
-# `continue_on_failure` is not true, all subsequent stages are skipped.
 stages:
   - name: build
     description: "Install project dependencies into the isolated checkout."
