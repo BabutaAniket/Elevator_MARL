@@ -41,7 +41,7 @@ stages:
     description: "Generate a coverage.py report for the application and CI dashboard tests."
     working_dir: "."
     command: >
-      python -m coverage run --source=. -m pytest test_sim.py mini_cicd/test_dashboard.py &&
+      python -m coverage run --source=agents,app,config,database,environment,simulation,traffic -m pytest test_sim.py mini_cicd/test_dashboard.py &&
       python -m coverage report -m &&
       python -m coverage html -d ../coverage_html
     continue_on_failure: false
