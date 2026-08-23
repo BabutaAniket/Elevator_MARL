@@ -1,3 +1,25 @@
+# Submission Details
+
+| Field | Details |
+| --- | --- |
+| **Project title** | Mini CI/CD Pipeline for Elevator MARL |
+| **Course** | The Program Developer’s Toolbox |
+| **Student name** | Aniket Babuta |
+| **Roll number** | x2anb746 |
+| **Target application** | Elevator MARL Simulator |
+| **Repository** | [BabutaAniket/Elevator_MARL](https://github.com/BabutaAniket/Elevator_MARL) |
+| **Submission date** | August 22, 2026 |
+
+## Aim
+
+To design and implement a fully local, configuration-driven CI/CD pipeline
+that detects new Git commits, creates an isolated build workspace, executes
+build, test, lint, coverage, and Docker packaging stages, and retains
+inspectable logs and build history. The Elevator MARL simulator is used as the
+sample target application to demonstrate that the pipeline validates and
+packages a realistic Python project without relying on GitHub Actions, Jenkins,
+or other cloud CI services.
+
 # Mini CI/CD Pipeline — Final Report
 
 ## 1. Architecture
@@ -129,3 +151,88 @@ both the console output and `python orchestrator.py show <run_id>`. The
 corresponding `logs/runs/<run_id>/unit_tests.log` contains the full `pytest`
 failure traceback with `START`/`END` timestamps, satisfying the rubric's
 requirement for clear, inspectable failure logging.
+
+## 5. Configuration Contract and Data Model
+
+The pipeline is intentionally controlled by a small declarative contract in
+`pipeline.yml`. The `project` section identifies the repository and watched
+branch; `watcher` defines the poll cadence and watermark file; and `history`
+defines the SQLite database and log root. Each item in `stages` supplies its
+name, working directory, command, timeout, and `continue_on_failure` policy.
+This makes execution order visible in one place and lets a different target
+project replace build/test/lint commands without changing Python source.
+
+The Docker stage is an explicit extension of the same contract. Its `type:
+docker` value selects the Docker runner and its `dockerfile` and `image_name`
+fields define the build inputs. At run time the orchestrator forms the image
+tag as `<image_name>:<commit_sha[:8]>`. SHA-derived tagging gives a direct,
+human-readable link between a packaged image and the source revision that
+produced it.
+
+The SQLite history consists of two related tables. `runs` stores immutable run
+metadata: run ID, project name, commit SHA, branch, start/finish timestamps,
+overall status, and duration. `stage_results` stores one row per stage with
+the stage status, exit code, duration, and absolute log path. The unique
+`(run_id, stage_name)` constraint prevents accidental duplication within one
+run, while the intentionally unique run ID preserves repeated attempts of the
+same commit as separate audit records.
+
+## 6. Operational Behaviour and Limitations
+
+The pipeline is designed for trusted, local repositories. Stage commands are
+shell commands declared by the repository maintainer in `pipeline.yml`; it is
+not intended to safely execute untrusted configuration supplied over a network.
+Likewise, the Docker stage requires a local Docker CLI and a running daemon.
+If either is unavailable, the explicit `docker info` probe records a failed
+stage with a clear diagnostic, while preserving the results and logs from
+earlier stages.
+
+The watcher advances its last-seen SHA after the triggered pipeline process
+returns, regardless of the run's success or failure. This avoids repeatedly
+triggering the same known failed revision during normal polling. A production
+extension could instead maintain a retry queue or advance the watermark only
+After a successful run. Other practical extensions include parallelizing
+independent test/lint work, retaining coverage artifacts outside the temporary
+worktree, and sending local desktop/email notifications. A lightweight local
+Flask dashboard is implemented in `dashboard.py`; it reads the CI history
+database and per-stage logs to show recent runs, statuses, durations, Docker
+image tags, and log links without modifying pipeline execution.
+
+## 7. Reproduction Checklist
+
+1. Install Python 3.9+, Git, and Docker Desktop; start the Docker daemon.
+2. From `mini_cicd/`, install the pipeline dependency with
+  `pip install -r requirements.txt`.
+3. Start a one-off verified build with `run.bat` on Windows or
+  `python orchestrator.py run`.
+4. Inspect the stored outcome using `python orchestrator.py history` followed
+  by `python orchestrator.py show <run_id>`.
+5. Confirm the corresponding `logs/runs/<run_id>/` directory contains the
+  stage logs and use `docker images elevator-marl` to verify the SHA-tagged
+  image after a successful Docker stage.
+6. Run `python watcher.py --once` to demonstrate polling behaviour, or run
+  `python watcher.py` for continuous commit monitoring.
+
+## 8. References
+
+1. Git, [git worktree documentation](https://git-scm.com/docs/git-worktree).
+  This is the isolation mechanism used to build a detached checkout for each
+  revision.
+2. Python Software Foundation, [subprocess documentation](https://docs.python.org/3/library/subprocess.html).
+  The orchestrator uses `subprocess.run` for Git, shell stages, Docker, and
+  per-stage timeout handling.
+3. SQLite, [SQLite documentation](https://www.sqlite.org/docs.html). The local
+  build-history database uses SQLite tables for runs and stage results.
+4. Docker, [docker image build reference](https://docs.docker.com/reference/cli/docker/image/build/).
+  Docker image builds are invoked locally and tagged with a source revision.
+5. pytest, [pytest documentation](https://docs.pytest.org/). The configured
+  unit-test stage emits both terminal output and a JUnit XML report.
+6. Coverage.py, [coverage.py documentation](https://coverage.readthedocs.io/).
+  The coverage stage creates console and HTML coverage artifacts.
+7. PyCQA, [Flake8 documentation](https://flake8.pycqa.org/). Flake8 provides
+  the configured static-analysis stage.
+8. GitHub, [GitHub Actions documentation](https://docs.github.com/actions).
+  This project is a deliberately local, lightweight pipeline inspired by the
+  staged CI workflow model rather than a deployment on GitHub Actions.
+9. Project source and configuration: [Elevator_MARL on GitHub](https://github.com/BabutaAniket/Elevator_MARL), including the
+  [`mini_cicd` directory](https://github.com/BabutaAniket/Elevator_MARL/tree/main/mini_cicd).

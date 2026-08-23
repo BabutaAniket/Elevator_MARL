@@ -78,6 +78,21 @@ python orchestrator.py history
 python orchestrator.py show <run_id>
 ```
 
+### Start the local CI/CD dashboard
+
+```powershell
+python -m pip install -r requirements.txt
+python dashboard.py
+# or on Windows:
+run_dashboard.bat
+```
+
+Open `http://127.0.0.1:5050`. The dashboard shows the latest 50 runs, commit
+SHA, branch, timestamps, overall status, duration, per-stage status/exit
+evidence, successful Docker image tags, and clickable stage logs. It reads the
+existing SQLite build history and log directory; it does not start or modify
+pipeline runs.
+
 ## Configuration (`pipeline.yml`)
 
 | Section    | Purpose                                                             |
@@ -102,6 +117,8 @@ orchestrator code requires no changes.
   per-stage log file and the SQLite `stage_results` table.
 - **Logging** — every stage writes a timestamped, self-contained log file under
   `logs/runs/<run_id>/<stage>.log`.
+- **Dashboard** — `dashboard.py` provides a local Flask interface for build
+  history, stage status, image tags, and stage-log inspection.
 
 ## Demonstrating Success / Failure
 

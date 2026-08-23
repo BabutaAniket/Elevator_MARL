@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ project_name }} CI Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #657083;
+      --canvas: #eef2f4;
+      --surface: #ffffff;
+      --line: #d7dde3;
+      --navy: #173b62;
+      --teal: #0e756d;
+      --green: #17653c;
+      --red: #9c2f35;
+      --amber: #8a5a00;
+      --gray: #718096;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background-color: var(--canvas);
+      background-image: linear-gradient(90deg, rgba(23, 59, 98, 0.035) 1px, transparent 1px), linear-gradient(rgba(23, 59, 98, 0.035) 1px, transparent 1px);
+      background-size: 24px 24px;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: end;
+      padding: 30px max(28px, calc((100vw - 1400px) / 2));
+      background: var(--navy);
+      color: #fff;
+      border-bottom: 4px solid var(--teal);
+    }
+
+    h1, h2, p { margin: 0; }
+
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: 0; }
+    h2 { font-size: 18px; }
+
+    .subtitle { margin-top: 7px; color: #d6e0ea; font-family: "Trebuchet MS", sans-serif; font-size: 14px; }
+    .branch { font-family: "Trebuchet MS", sans-serif; font-size: 13px; text-align: right; color: #d6e0ea; }
+    .branch strong { color: #fff; font-size: 15px; }
+
+    main { max-width: 1400px; margin: 0 auto; padding: 28px; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 26px;
+    }
+
+    .metric {
+      min-height: 100px;
+      padding: 17px 18px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--navy);
+    }
+
+    .metric.passed { border-top-color: var(--green); }
+    .metric.failed { border-top-color: var(--red); }
+    .metric.running { border-top-color: var(--amber); }
+    .metric-label { color: var(--muted); font-family: "Trebuchet MS", sans-serif; font-size: 12px; text-transform: uppercase; }
+    .metric-value { margin-top: 10px; font-family: "Trebuchet MS", sans-serif; font-size: 31px; font-weight: 700; }
+
+    .panel { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); }
+    .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 18px; border-bottom: 1px solid var(--line); }
+    .panel-heading p { color: var(--muted); font-family: "Trebuchet MS", sans-serif; font-size: 13px; }
+
+    table { width: 100%; min-width: 1020px; border-collapse: collapse; }
+    th { padding: 12px 14px; color: #fff; background: #233a52; font-family: "Trebuchet MS", sans-serif; font-size: 12px; font-weight: 700; text-align: left; text-transform: uppercase; }
+    td { padding: 14px; border-bottom: 1px solid var(--line); font-family: "Trebuchet MS", sans-serif; font-size: 13px; vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #f6f9fa; }
+
+    .sha, .run-id { display: block; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+    .run-id { max-width: 190px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+    .sha { margin-bottom: 5px; color: var(--navy); font-size: 14px; font-weight: 700; }
+    .muted { color: var(--muted); }
+    .status { display: inline-block; min-width: 66px; padding: 5px 8px; font-size: 11px; font-weight: 700; letter-spacing: 0; text-align: center; text-transform: uppercase; }
+    .status.passed { color: var(--green); background: #e6f4eb; }
+    .status.failed, .status.error { color: var(--red); background: #fbeaec; }
+    .status.running { color: var(--amber); background: #fff3d6; }
+    .status.missing { color: var(--gray); background: #eef1f4; }
+    .stage-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 310px; }
+    .stage { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: #fafcfc; padding: 5px 6px; font-size: 11px; }
+    .stage-name { color: var(--muted); }
+    a.log-link { color: var(--navy); font-weight: 700; text-decoration: none; border-bottom: 1px solid currentColor; }
+    a.log-link:hover { color: var(--teal); }
+    .image-tag { display: block; max-width: 180px; overflow-wrap: anywhere; color: var(--teal); font-family: Consolas, "Courier New", monospace; font-size: 12px; font-weight: 700; }
+    .empty { padding: 50px; color: var(--muted); font-family: "Trebuchet MS", sans-serif; text-align: center; }
+
+    @media (max-width: 720px) {
+      header { display: block; padding: 24px; }
+      .branch { margin-top: 18px; text-align: left; }
+      main { padding: 18px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Local CI/CD Dashboard</h1>
+      <p class="subtitle">{{ project_name }} build history and stage evidence</p>
+    </div>
+    <p class="branch">Watched branch<br><strong>{{ branch }}</strong></p>
+  </header>
+  <main>
+    <section class="summary" aria-label="Run summary">
+      <article class="metric"><p class="metric-label">Recorded runs</p><p class="metric-value">{{ summary.total }}</p></article>
+      <article class="metric passed"><p class="metric-label">Passed</p><p class="metric-value">{{ summary.passed }}</p></article>
+      <article class="metric failed"><p class="metric-label">Failed or error</p><p class="metric-value">{{ summary.failed }}</p></article>
+      <article class="metric running"><p class="metric-label">Running</p><p class="metric-value">{{ summary.running }}</p></article>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><h2>Recent Pipeline Runs</h2><p>Latest 50 recorded runs</p></div>
+      {% if runs %}
+      <table>
+        <thead>
+          <tr><th>Commit</th><th>Branch</th><th>Started</th><th>Duration</th><th>Overall status</th><th>Stages</th><th>Docker image</th></tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+          <tr>
+            <td><span class="sha">{{ run.commit_sha[:8] }}</span><span class="run-id" title="{{ run.run_id }}">{{ run.run_id }}</span></td>
+            <td>{{ run.branch }}</td>
+            <td>{{ run.started_at }}</td>
+            <td>{{ "%.1f s"|format(run.duration_s) if run.duration_s is not none else "-" }}</td>
+            <td><span class="status {{ run.status }}">{{ run.status }}</span></td>
+            <td>
+              <div class="stage-list">
+                {% for stage_name in stages %}
+                  {% set stage = run.stages.get(stage_name) %}
+                  <span class="stage">
+                    <span class="stage-name">{{ stage_name }}</span>
+                    <span class="status {{ stage.status if stage else 'missing' }}">{{ stage.status if stage else 'not run' }}</span>
+                    {% if stage and stage.has_log %}<a class="log-link" href="{{ url_for('stage_log', run_id=run.run_id, stage_name=stage_name) }}">log</a>{% endif %}
+                  </span>
+                {% endfor %}
+              </div>
+            </td>
+            <td>{% if run.image_tag %}<span class="image-tag">{{ run.image_tag }}</span>{% else %}<span class="muted">Not available</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty">No pipeline runs have been recorded yet.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

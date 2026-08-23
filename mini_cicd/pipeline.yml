@@ -35,14 +35,15 @@ stages:
     command: >
       python -m pip install --upgrade pip &&
       python -m pip install -r requirements.txt &&
+      python -m pip install -r mini_cicd/requirements.txt &&
       python -m pip install pytest flake8 coverage
     continue_on_failure: false
     timeout_seconds: 900
 
   - name: unit_tests
-    description: "Run the Elevator MARL pytest suite."
+    description: "Run the Elevator MARL and Mini CI/CD pytest suites."
     working_dir: "."
-    command: "python -m pytest test_sim.py -v --junitxml=pytest-report.xml"
+    command: "python -m pytest test_sim.py mini_cicd/test_dashboard.py -v --junitxml=pytest-report.xml"
     continue_on_failure: false
     timeout_seconds: 600
 
@@ -54,10 +55,10 @@ stages:
     timeout_seconds: 300
 
   - name: coverage
-    description: "Generate a coverage.py report for the test suite."
+    description: "Generate a coverage.py report for the application and CI dashboard tests."
     working_dir: "."
     command: >
-      python -m coverage run --source=. -m pytest test_sim.py &&
+      python -m coverage run --source=. -m pytest test_sim.py mini_cicd/test_dashboard.py &&
       python -m coverage report -m &&
       python -m coverage html -d coverage_html
     continue_on_failure: false
